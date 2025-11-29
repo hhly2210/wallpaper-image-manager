@@ -18,7 +18,7 @@ export default function App() {
         <Outlet />
         <ScrollRestoration />
         <Scripts />
-      </body>
+          </body>
     </html>
   );
 }

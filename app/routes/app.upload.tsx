@@ -1,13 +1,16 @@
-import { useState } from "react";
+import { useState, lazy, Suspense } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 
+// Lazy load the Google Drive connection component
+const GoogleDriveConnection = lazy(() => import("../components/GoogleDriveConnection.client"));
+
 // Zod schema for form validation
 const uploadFormSchema = z.object({
   category: z.string().min(1, "Please select a category"),
-  resolution: z.string().min(1, "Please select a resolution"),
-  quality: z.string().min(1, "Please select a quality"),
+  skuTarget: z.string().min(1, "Please select a SKU target option"),
+  conflictResolution: z.string().min(1, "Please select a conflict resolution option"),
 });
 
 type UploadFormData = z.infer<typeof uploadFormSchema>;
@@ -45,6 +48,22 @@ export default function UploadPage() {
 
   return (
     <s-page heading="Upload">
+      <Suspense fallback={
+        <s-section heading="Google Drive Connection">
+          <s-box padding="base" borderWidth="base" borderRadius="base" background="subdued">
+            <s-stack direction="block" gap="base">
+              <s-stack direction="inline" alignment="center" gap="base">
+                <s-icon source="https://www.gstatic.com/images/icons/material/system/1x/drive_cloud_24dp.png" />
+                <s-heading level="3">Google Drive Integration</s-heading>
+              </s-stack>
+              <s-button loading disabled>Loading Google Drive...</s-button>
+            </s-stack>
+          </s-box>
+        </s-section>
+      }>
+        <GoogleDriveConnection />
+      </Suspense>
+
       <s-section heading="Upload Configuration">
         <form onSubmit={handleSubmit(onSubmit)}>
           <s-stack direction="block" gap="large">
@@ -54,6 +73,7 @@ export default function UploadPage() {
                 {...register("category")}
                 placeholder="Select a category"
                 invalid={!!errors.category}
+                label="Category"
               >
                 <s-option value="">Choose category...</s-option>
                 <s-option value="nature">Nature</s-option>
@@ -71,43 +91,39 @@ export default function UploadPage() {
             </s-box>
 
             <s-box>
-              <s-label required>Resolution</s-label>
+              <s-label required>SKU Target</s-label>
               <s-select
-                {...register("resolution")}
-                placeholder="Select resolution"
-                invalid={!!errors.resolution}
+                {...register("skuTarget")}
+                placeholder="Select SKU target option"
+                invalid={!!errors.skuTarget}
+                label="SKU Target"
               >
-                <s-option value="">Choose resolution...</s-option>
-                <s-option value="1920x1080">1920x1080 (Full HD)</s-option>
-                <s-option value="2560x1440">2560x1440 (2K)</s-option>
-                <s-option value="3840x2160">3840x2160 (4K)</s-option>
-                <s-option value="7680x4320">7680x4320 (8K)</s-option>
-                <s-option value="mobile">Mobile (1080x1920)</s-option>
-                <s-option value="tablet">Tablet (2048x2732)</s-option>
+                <s-option value="">Choose SKU target...</s-option>
+                <s-option value="exact-sku">Exact SKU Match</s-option>
+                <s-option value="contains-sku">Contains SKU</s-option>
               </s-select>
-              {errors.resolution && (
+              {errors.skuTarget && (
                 <s-text-container tone="critical">
-                  <s-text as="p" variant="bodySm">{errors.resolution.message}</s-text>
+                  <s-text as="p" variant="bodySm">{errors.skuTarget.message}</s-text>
                 </s-text-container>
               )}
             </s-box>
 
             <s-box>
-              <s-label required>Quality</s-label>
+              <s-label required>Conflict Resolution</s-label>
               <s-select
-                {...register("quality")}
-                placeholder="Select quality"
-                invalid={!!errors.quality}
+                {...register("conflictResolution")}
+                placeholder="Select conflict resolution option"
+                invalid={!!errors.conflictResolution}
+                label="Conflict Resolution"
               >
-                <s-option value="">Choose quality...</s-option>
-                <s-option value="low">Low (Fast)</s-option>
-                <s-option value="medium">Medium (Balanced)</s-option>
-                <s-option value="high">High (Best)</s-option>
-                <s-option value="ultra">Ultra (Maximum)</s-option>
+                <s-option value="">Choose conflict resolution...</s-option>
+                <s-option value="overwrite">Overwrite</s-option>
+                <s-option value="rename">Rename</s-option>
               </s-select>
-              {errors.quality && (
+              {errors.conflictResolution && (
                 <s-text-container tone="critical">
-                  <s-text as="p" variant="bodySm">{errors.quality.message}</s-text>
+                  <s-text as="p" variant="bodySm">{errors.conflictResolution.message}</s-text>
                 </s-text-container>
               )}
             </s-box>
