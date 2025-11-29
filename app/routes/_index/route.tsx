@@ -21,9 +21,9 @@ export default function App() {
   return (
     <div className={styles.index}>
       <div className={styles.content}>
-        <h1 className={styles.heading}>A short heading about [your app]</h1>
+        <h1 className={styles.heading}>Wallpaper Image Manager</h1>
         <p className={styles.text}>
-          A tagline about [your app] that describes your value proposition.
+          Manage your store's wallpapers and images efficiently.
         </p>
         {showForm && (
           <Form className={styles.form} method="post" action="/auth/login">
@@ -39,16 +39,13 @@ export default function App() {
         )}
         <ul className={styles.list}>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Image Management</strong>. Upload, organize and manage your wallpaper collections.
           </li>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Bulk Operations</strong>. Process multiple images at once with powerful tools.
           </li>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Easy Integration</strong>. Seamlessly works with your Shopify store.
           </li>
         </ul>
       </div>

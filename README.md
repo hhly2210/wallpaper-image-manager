@@ -1,6 +1,6 @@
-# Shopify App Template - React Router
+# Wallpaper Image Manager - Shopify App
 
-This is a template for building a [Shopify app](https://shopify.dev/docs/apps/getting-started) using [React Router](https://reactrouter.com/).  It was forked from the [Shopify Remix app template](https://github.com/Shopify/shopify-app-template-remix) and converted to React Router.
+A custom Shopify admin app for managing store wallpapers and images. Built with [React Router](https://reactrouter.com/) and Shopify's Polaris components.
 
 Rather than cloning this repo, follow the [Quick Start steps](https://github.com/Shopify/shopify-app-template-react-router#quick-start).
 
