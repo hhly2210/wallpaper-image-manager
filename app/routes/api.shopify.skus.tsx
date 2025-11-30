@@ -79,11 +79,11 @@ export async function action({ request }: { request: Request }) {
 
     const shopifyData = await response.json();
 
-    // Extract and format SKU data (Shopify query already filtered for Wallpaper products)
+    // Extract and format SKU data with Product -> Variant structure
     const products = shopifyData?.data?.products?.edges || [];
     const productsPageInfo = shopifyData?.data?.products?.pageInfo;
 
-    const skuList = [];
+    const productList = [];
     let totalVariants = 0;
     let totalProducts = products.length;
 
@@ -102,40 +102,51 @@ export async function action({ request }: { request: Request }) {
 
       console.log(`[${requestId}] Processing Wallpaper product: "${product.title}" (${product.productType})`);
 
+      // Filter variants with SKUs
+      const variantsWithSKUs = [];
+
       variants.forEach((variantEdge: any) => {
         const variant = variantEdge.node;
 
         // Only include variants with SKUs
         if (variant.sku && variant.sku.trim()) {
-          skuList.push({
+          variantsWithSKUs.push({
             id: variant.id,
             sku: variant.sku.trim(),
             title: variant.title,
-            productId: product.id,
-            productHandle: product.handle,
-            productTitle: product.title,
-            productStatus: product.status,
-            productType: product.productType,
-            productTags: product.tags,
             price: variant.price,
             inventoryQuantity: variant.inventoryQuantity,
             createdAt: variant.createdAt,
             updatedAt: variant.updatedAt,
             options: {
               selectedOptions: variant.selectedOptions || []
-            },
-            isWallpaper: true,
-            productOrgType: product.productType // Store the Product Organization Type
+            }
           });
           totalVariants++;
         }
       });
+
+      // Only add product if it has variants with SKUs
+      if (variantsWithSKUs.length > 0) {
+        productList.push({
+          id: product.id,
+          handle: product.handle,
+          title: product.title,
+          status: product.status,
+          productType: product.productType,
+          tags: product.tags,
+          isWallpaper: true,
+          productOrgType: product.productType,
+          variantCount: variantsWithSKUs.length,
+          variants: variantsWithSKUs
+        });
+      }
     });
 
     console.log(`[${requestId}] Successfully fetched REAL SKUs from Shopify:`, {
       totalProducts,
       totalVariants,
-      skusWithValidData: skuList.length,
+      productsWithSKUs: productList.length,
       hasNextPage: productsPageInfo?.hasNextPage,
       queryUsed: query || buildWallpaperQuery(),
       shop: session.shop
@@ -143,21 +154,22 @@ export async function action({ request }: { request: Request }) {
 
     return new Response(JSON.stringify({
       success: true,
-      data: skuList,
+      data: productList, // Changed to product list structure
       pageInfo: {
         hasNextPage: productsPageInfo?.hasNextPage || false,
         endCursor: productsPageInfo?.endCursor || null
       },
       summary: {
         totalProducts,
+        productsWithSKUs: productList.length,
         wallpaperProducts: totalProducts, // All products are wallpaper due to query filter
         totalVariants,
-        skusWithValidData: skuList.length,
         hasQuery: !!query,
         filterType: 'wallpaper-products',
         queryUsed: query || buildWallpaperQuery(),
         isRealData: true,
-        shop: session.shop
+        shop: session.shop,
+        dataStructure: 'products-contain-variants'
       },
       requestId,
       timestamp: new Date().toISOString()
