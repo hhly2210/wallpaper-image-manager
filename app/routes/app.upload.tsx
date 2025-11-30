@@ -20,15 +20,12 @@ export default function UploadPage() {
   const [isDryRunning, setIsDryRunning] = useState(false);
   const [dryResults, setDryResults] = useState<any>(null);
   const [selectedFolder, setSelectedFolder] = useState<string>('');
-  const [dryUploadProgress, setDryUploadProgress] = useState<string[]>([]);
-  const [skuData, setSkuData] = useState<any[]>([]);
+    const [skuData, setSkuData] = useState<any[]>([]);
   const [flattenedSKUs, setFlattenedSKUs] = useState<any[]>([]); // For UI display
   const [isLoadingSKUs, setIsLoadingSKUs] = useState(false);
   const [skuError, setSkuError] = useState<string | null>(null);
 
-  // Separate data store specifically for Dry Upload processing
-  const [dryUploadSKUs, setDryUploadSKUs] = useState<any[]>([]);
-
+  
   const {
     register,
     handleSubmit,
@@ -82,14 +79,12 @@ export default function UploadPage() {
     };
   }, [selectedFolder]);
 
-  // Helper function to add debug logs and update progress
-  const addProgressLog = (step: string, details?: string) => {
+  
+  // Helper function for console logging only
+  const logProgress = (step: string, details?: string) => {
     const timestamp = new Date().toLocaleTimeString();
     const logMessage = `[${timestamp}] ${step}${details ? `: ${details}` : ''}`;
-
-    console.log(`🧪 DRY UPLOAD DEBUG - ${logMessage}`);
-
-    setDryUploadProgress(prev => [...prev, logMessage]);
+    console.log(`🧪 DRY UPLOAD - ${logMessage}`);
   };
 
   const onSubmit = async (data: UploadFormData) => {
@@ -210,7 +205,7 @@ export default function UploadPage() {
         setSkuData(cached.data);
         setFlattenedSKUs(cached.flattened);
 
-        addProgressLog('📦 Shopify Cache', `Loaded ${cached.flattened.length} variants from cache (${Math.round((Date.now() - cached.timestamp) / 1000 / 60)} minutes old)`);
+        logProgress('📦 Shopify Cache', `Loaded ${cached.flattened.length} variants from cache (${Math.round((Date.now() - cached.timestamp) / 1000 / 60)} minutes old)`);
         return cached.flattened;
       }
     }
@@ -219,7 +214,7 @@ export default function UploadPage() {
     setSkuError(null);
 
     try {
-      addProgressLog('🛒 Shopify Sync', forceRefresh ? 'Refreshing SKU data from Shopify...' : 'Bắt đầu lấy danh sách SKU từ Shopify...');
+      logProgress('🛒 Shopify Sync', forceRefresh ? 'Refreshing SKU data from Shopify...' : 'Bắt đầu lấy danh sách SKU từ Shopify...');
 
       const response = await fetch('/api/shopify/skus', {
         method: 'POST',
@@ -260,11 +255,11 @@ export default function UploadPage() {
         // Save to cache for future use
         saveSKUDataToCache(data.data, flattened);
 
-        addProgressLog('✅ Shopify Sync', `Đã lấy ${flattened.length} variants từ ${data.data.length} products`);
-        addProgressLog('📊 SKU Summary', `- Total Products: ${data.summary?.totalProducts || 0}- Products with SKUs: ${data.summary?.productsWithSKUs || 0}- Total Variants: ${data.summary?.totalVariants || 0}- Valid SKUs: ${flattened.length}`);
-        addProgressLog('🎨 Color Filter', `Chỉ variants có Color option được bao gồm`);
-        addProgressLog('🏷️ Product Type', `Product Organization = "Wallpaper"`);
-        addProgressLog('💾 Cache', 'SKU data saved for 24 hours');
+        logProgress('✅ Shopify Sync', `Đã lấy ${flattened.length} variants từ ${data.data.length} products`);
+        logProgress('📊 SKU Summary', `- Total Products: ${data.summary?.totalProducts || 0}- Products with SKUs: ${data.summary?.productsWithSKUs || 0}- Total Variants: ${data.summary?.totalVariants || 0}- Valid SKUs: ${flattened.length}`);
+        logProgress('🎨 Color Filter', `Chỉ variants có Color option được bao gồm`);
+        logProgress('🏷️ Product Type', `Product Organization = "Wallpaper"`);
+        logProgress('💾 Cache', 'SKU data saved for 24 hours');
 
         return flattened;
       } else {
@@ -274,7 +269,7 @@ export default function UploadPage() {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       setSkuError(errorMessage);
-      addProgressLog('❌ Shopify Sync Error', `Không thể lấy SKU: ${errorMessage}`);
+      logProgress('❌ Shopify Sync Error', `Không thể lấy SKU: ${errorMessage}`);
       console.error('Failed to fetch SKUs:', error);
       return [];
     } finally {
@@ -282,45 +277,27 @@ export default function UploadPage() {
     }
   };
 
-  // Function to load SKUs specifically for Dry Upload
-  const loadSKUsForDryUpload = async () => {
-    addProgressLog('🎯 DRY UPLOAD PREP', 'Loading SKUs for Dry Upload processing...');
-
-    const skus = await fetchSKUsFromShopify();
-
-    if (skus.length > 0) {
-      setDryUploadSKUs(skus); // Load into separate Dry Upload store
-      addProgressLog('✅ DRY UPLOAD READY', `Loaded ${skus.length} SKUs for Dry Upload processing`);
-    } else {
-      addProgressLog('❌ DRY UPLOAD FAILED', 'No SKUs available for Dry Upload');
-    }
-
-    return skus;
-  };
-
+  
   // Auto-check SKU data availability before dry upload
   const checkSKUDataAvailability = () => {
     console.log('🔍 SKU DATA CHECK:', {
-      flattenedSKUs: flattenedSKUs.length, // UI data
-      dryUploadSKUs: dryUploadSKUs.length, // Dry Upload data
+      flattenedSKUs: flattenedSKUs.length,
       isLoadingSKUs,
       skuError,
       skuData: skuData.length,
-      hasFlattenedSKUs: flattenedSKUs.length > 0,
-      hasDryUploadSKUs: dryUploadSKUs.length > 0,
-      hasSkuData: skuData.length > 0
+      hasSKUs: flattenedSKUs.length > 0
     });
 
     // Log first few SKUs for debugging
-    if (dryUploadSKUs.length > 0) {
-      console.log('📋 SAMPLE DRY UPLOAD SKUs:', dryUploadSKUs.slice(0, 3).map(sku => ({
+    if (flattenedSKUs.length > 0) {
+      console.log('📋 SAMPLE SKUs:', flattenedSKUs.slice(0, 3).map(sku => ({
         sku: sku.sku,
         title: sku.title,
         color: sku.color
       })));
     }
 
-    return dryUploadSKUs.length > 0; // Use dryUploadSKUs instead
+    return flattenedSKUs.length > 0;
   };
 
   // Client-side dry upload simulation
@@ -332,154 +309,144 @@ export default function UploadPage() {
     }
 
     console.log('🚨 START DRY UPLOAD', {
-      flattenedSKUs: flattenedSKUs.length, // UI data
-      dryUploadSKUs: dryUploadSKUs.length, // Dry Upload data
+      flattenedSKUs: flattenedSKUs.length,
       isLoadingSKUs,
       skuError,
       skuData: skuData.length
     });
 
-    // Check if we have Dry Upload SKU data, if not suggest fetching
-    if (dryUploadSKUs.length === 0 && !isLoadingSKUs) {
-      addProgressLog('⚠️ WARNING', 'No SKU data available for Dry Upload! Click "Load SKUs for Dry Upload" first.');
-      console.log('⚠️ No Dry Upload SKU data available - suggesting fetch to user');
-    }
-
     setIsDryRunning(true);
     setDryResults(null);
-    setDryUploadProgress([]); // Clear previous progress
 
     try {
       // BƯỚC 1: Validate input
-      addProgressLog('BƯỚC 1', 'Kiểm tra đầu vào');
-
-      // Check SKU data availability
-      const hasSKUs = checkSKUDataAvailability();
-      if (!hasSKUs) {
-        addProgressLog('⚠️ SKU Warning', 'No SKU data available - files will be processed as general uploads');
-      }
-
-      // Critical Debug: Check SKU data states early
-      console.log('🚨 DEBUG SKU STATES:', {
-        flattenedSKUs: flattenedSKUs.length,
-        isLoadingSKUs,
-        skuError,
-        skuData: skuData.length
-      });
-
-      addProgressLog('🔍 DEBUG SKU', `flattenedSKUs: ${flattenedSKUs.length} (UI), dryUploadSKUs: ${dryUploadSKUs.length} (Dry Upload), isLoading: ${isLoadingSKUs}, error: ${!!skuError}`);
-
-      // Auto-load SKUs for Dry Upload if needed
-      if (dryUploadSKUs.length === 0 && !isLoadingSKUs && !skuError) {
-        addProgressLog('BƯỚC 1.5', 'Tải dữ liệu SKU cho Dry Upload');
-        addProgressLog('🎯 Loading SKUs', 'Dry Upload chưa có SKU data - đang tải từ Shopify...');
-        const autoLoadedSKUs = await loadSKUsForDryUpload();
-        if (autoLoadedSKUs.length > 0) {
-          addProgressLog('✅ SKUs Loaded', `Đã tải ${autoLoadedSKUs.length} SKUs cho Dry Upload processing`);
-        }
-      } else if (dryUploadSKUs.length > 0) {
-        addProgressLog('✅ READY', `Using ${dryUploadSKUs.length} SKUs for Dry Upload`);
-      } else if (isLoadingSKUs) {
-        addProgressLog('⏳ LOADING', 'SKU data loading...');
-      } else {
-        addProgressLog('❌ ERROR', `SKU error: ${skuError}`);
-      }
+      logProgress('BƯỚC 1', 'Kiểm tra đầu vào');
 
       const formData = getValues();
       const selectedFolderId = getSelectedFolder();
 
       // Early validation check
       if (!selectedFolderId) {
-        addProgressLog('❌ EARLY STOP', 'Không có folder được chọn');
+        logProgress('❌ EARLY STOP', 'Không có folder được chọn');
         throw new Error('Please select a Google Drive folder first');
       }
 
-      addProgressLog('Form Data', JSON.stringify(formData, null, 2));
-      addProgressLog('Selected Folder', selectedFolderId);
+      if (!formData.skuTarget || !formData.conflictResolution) {
+        logProgress('❌ EARLY STOP', 'Vui lòng điền đầy đủ form configuration');
+        throw new Error('Please fill in all form fields');
+      }
+
+      logProgress('✅ Input validation', 'Tất cả đầu vào hợp lệ');
+
+      // BƯỚC 1.5: Fetch SKUs for processing (local variable, no hook)
+      logProgress('BƯỚC 1.5', 'Tải dữ liệu SKU cho xử lý');
+
+      let processingSKUs = [];
+
+      if (flattenedSKUs.length > 0) {
+        processingSKUs = flattenedSKUs;
+        logProgress('✅ SKUs Ready', `Sử dụng ${processingSKUs.length} SKUs có sẵn`);
+      } else {
+        logProgress('🎯 Fetching SKUs', 'Đang tải SKU từ Shopify...');
+        processingSKUs = await fetchSKUsFromShopify();
+
+        if (processingSKUs.length > 0) {
+          logProgress('✅ SKUs Loaded', `Đã tải ${processingSKUs.length} SKUs cho xử lý`);
+        } else {
+          logProgress('⚠️ No SKUs', 'Không tải được SKU nào - sẽ xử lý như general upload');
+        }
+      }
+
+      logProgress('📊 Processing Summary', `Sử dụng ${processingSKUs.length} SKUs cho processing`);
+      logProgress('Form Data', JSON.stringify(formData, null, 2));
+      logProgress('Selected Folder', selectedFolderId);
 
       // Critical: Check if we have SKU data before proceeding
-      addProgressLog('🚨 PRE-PROCESS CHECK', `Will process with ${dryUploadSKUs.length} SKUs available for Dry Upload`);
+      logProgress('🚨 PRE-PROCESS CHECK', `Will process with ${processingSKUs.length} SKUs available for processing`);
 
       if (!selectedFolderId) {
-        addProgressLog('❌ LỖI', 'Vui lòng chọn thư mục Google Drive trước');
+        logProgress('❌ LỖI', 'Vui lòng chọn thư mục Google Drive trước');
         alert('Please select a Google Drive folder first');
         setIsDryRunning(false);
         return;
       }
 
       if (!formData.skuTarget || !formData.conflictResolution) {
-        addProgressLog('❌ LỖI', 'Vui lòng điền đầy đủ form configuration');
+        logProgress('❌ LỖI', 'Vui lòng điền đầy đủ form configuration');
         alert('Please fill in all form fields');
         setIsDryRunning(false);
         return;
       }
 
-      addProgressLog('✅ Input validation', 'Tất cả đầu vào hợp lệ');
+      logProgress('✅ Input validation', 'Tất cả đầu vào hợp lệ');
 
       // Bước 2: Kiểm tra kết nối Google Drive
-      addProgressLog('BƯỚC 2', 'Kiểm tra kết nối Google Drive');
+      logProgress('BƯỚC 2', 'Kiểm tra kết nối Google Drive');
 
       const accessToken = await getGoogleDriveToken();
 
       if (!accessToken) {
-        addProgressLog('❌ LỖI', 'Không thể lấy access token từ Google Drive');
+        logProgress('❌ LỖI', 'Không thể lấy access token từ Google Drive');
         throw new Error('Not connected to Google Drive. Please connect first.');
       }
 
-      addProgressLog('✅ Google Drive Connected', `Access token length: ${accessToken.length}`);
-      addProgressLog('Token Preview', `${accessToken.substring(0, 20)}...`);
+      logProgress('✅ Google Drive Connected', `Access token length: ${accessToken.length}`);
+      logProgress('Token Preview', `${accessToken.substring(0, 20)}...`);
 
       // Bước 3: Kết nối đến Google Drive API
-      addProgressLog('BƯỚC 3', 'Kết nối đến Google Drive API');
+      logProgress('BƯỚC 3', 'Kết nối đến Google Drive API');
 
       const dryUploadResults = await simulateFolderUpload(
         selectedFolderId,
         accessToken,
         formData,
-        dryUploadSKUs // Use separate Dry Upload SKU data
+        processingSKUs // Use local processing SKUs
       );
 
-      addProgressLog('✅ API Connection', 'Đã kết nối thành công đến Google Drive API');
+      logProgress('✅ API Connection', 'Đã kết nối thành công đến Google Drive API');
 
       // Bước 4: Xử lý kết quả
-      addProgressLog('BƯỚC 4', 'Xử lý kết quả và tạo báo cáo');
+      logProgress('BƯỚC 4', 'Xử lý kết quả và tạo báo cáo');
 
       setDryResults(dryUploadResults);
 
       const { totalFiles, successCount, errorCount, processingTime, results } = dryUploadResults;
 
-      addProgressLog('📊 Summary', `Tổng: ${totalFiles}, Thành công: ${successCount}, Lỗi: ${errorCount}`);
-      addProgressLog('⏱️ Performance', `Processing time: ${processingTime}ms`);
+      logProgress('📊 Summary', `Tổng: ${totalFiles}, Thành công: ${successCount}, Lỗi: ${errorCount}`);
+      logProgress('⏱️ Performance', `Processing time: ${processingTime}ms`);
 
       if (results && results.length > 0) {
-        addProgressLog('📋 File Details', `Đã xử lý ${results.length} files`);
+        logProgress('📋 File Details', `Đã xử lý ${results.length} files`);
         results.slice(0, 5).forEach((result: any, index: number) => {
-          addProgressLog(`File ${index + 1}`, `${result.fileName} - ${result.status.toUpperCase()}`);
+          logProgress(`File ${index + 1}`, `${result.fileName} - ${result.status.toUpperCase()}`);
         });
         if (results.length > 5) {
-          addProgressLog('...', `và ${results.length - 5} files nữa`);
+          logProgress('...', `và ${results.length - 5} files nữa`);
         }
       }
 
       // Bước 5: Hiển thị kết quả
-      addProgressLog('BƯỚC 5', 'Hiển thị kết quả cho người dùng');
+      logProgress('BƯỚC 5', 'Hiển thị kết quả cho người dùng');
 
       const message = `🧪 Dry Upload Complete!\n\n` +
-        `📁 Total files found: ${totalFiles}\n` +
-        `✅ Would upload successfully: ${successCount}\n` +
-        `❌ Would fail: ${errorCount}\n` +
-        `⏱️ Processing time: ${processingTime}ms\n\n` +
+        `📁 Total files found: ${dryUploadResults.totalFiles}\n` +
+        `✅ Will upload: ${dryUploadResults.successCount}\n` +
+        `⏭️ Skipped (no SKU match): ${dryUploadResults.skippedCount}\n` +
+        `❌ Would fail: ${dryUploadResults.errorCount}\n` +
+        `🎯 SKU matched: ${dryUploadResults.matchedCount}\n` +
+        `⏱️ Processing time: ${dryUploadResults.processingTime}ms\n\n` +
         `📋 Configuration:\n` +
-        `• SKU Target: ${formData.skuTarget}\n` +
-        `• Conflict Resolution: ${formData.conflictResolution}\n\n` +
+        `• SKU Target: ${dryUploadResults.config.skuTarget}\n` +
+        `• Conflict Resolution: ${dryUploadResults.config.conflictResolution}\n\n` +
+        `💡 Only files with SKU matches will be uploaded.\n` +
         `This was a simulation - no files were actually uploaded.`;
 
       alert(message);
-      addProgressLog('✅ HOÀN TẤT', 'Dry upload simulation hoàn tất');
+      logProgress('✅ HOÀN TẤT', 'Dry upload simulation hoàn tất');
 
     } catch (error) {
       console.error('Dry upload failed:', error);
-      addProgressLog('❌ FATAL ERROR', error instanceof Error ? error.message : 'Unknown error');
+      logProgress('❌ FATAL ERROR', error instanceof Error ? error.message : 'Unknown error');
       console.error('🚨 ERROR STACK:', error.stack);
       alert(`❌ Dry Upload Failed\n\n${error instanceof Error ? error.message : 'Unknown error'}\n\nPlease check your Google Drive connection.`);
     } finally {
@@ -496,16 +463,16 @@ export default function UploadPage() {
     availableSKUs: any[] = []
   ) => {
     const startTime = Date.now();
-    addProgressLog('🔍 API Request', `Bắt đầu gọi Google Drive API cho folder: ${folderId}`);
+    logProgress('🔍 API Request', `Bắt đầu gọi Google Drive API cho folder: ${folderId}`);
 
     try {
       // Step 3.1: Tạo query và gọi API
-      addProgressLog('📝 Building Query', `'${folderId}' in parents and (mimeType contains 'image/') and trashed=false`);
+      logProgress('📝 Building Query', `'${folderId}' in parents and (mimeType contains 'image/') and trashed=false`);
 
       const query = `'${folderId}' in parents and (mimeType contains 'image/') and trashed=false`;
       const apiUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name,mimeType,size,createdTime,webViewLink)&pageSize=1000`;
 
-      addProgressLog('🌐 API Call', `Gọi API: ${apiUrl.substring(0, 100)}...`);
+      logProgress('🌐 API Call', `Gọi API: ${apiUrl.substring(0, 100)}...`);
 
       const response = await fetch(apiUrl, {
         headers: {
@@ -513,23 +480,23 @@ export default function UploadPage() {
         },
       });
 
-      addProgressLog('📡 API Response', `Status: ${response.status} ${response.statusText}`);
+      logProgress('📡 API Response', `Status: ${response.status} ${response.statusText}`);
 
       if (!response.ok) {
         const errorText = await response.text();
-        addProgressLog('❌ API Error', `Status: ${response.status}, Body: ${errorText.substring(0, 200)}...`);
+        logProgress('❌ API Error', `Status: ${response.status}, Body: ${errorText.substring(0, 200)}...`);
         throw new Error(`Google Drive API error: ${response.status} ${response.statusText}`);
       }
 
       // Step 3.2: Parse response
-      addProgressLog('📊 Parsing Response', 'Đang parse JSON response...');
+      logProgress('📊 Parsing Response', 'Đang parse JSON response...');
       const data = await response.json();
       const files = data.files || [];
 
-      addProgressLog('📁 Files Found', `Tìm thấy ${files.length} image files trong folder`);
+      logProgress('📁 Files Found', `Tìm thấy ${files.length} image files trong folder`);
 
       if (files.length === 0) {
-        addProgressLog('ℹ️ Empty Folder', 'Folder không chứa image files nào');
+        logProgress('ℹ️ Empty Folder', 'Folder không chứa image files nào');
         return {
           dryRun: true,
           folderId,
@@ -544,22 +511,23 @@ export default function UploadPage() {
       }
 
       // Step 3.3: Xử lý từng file với SKU matching
-      addProgressLog('🔄 File Processing', `Bắt đầu xử lý ${files.length} files với ${availableSKUs.length} variants available...`);
+      logProgress('🔄 File Processing', `Bắt đầu xử lý ${files.length} files với ${availableSKUs.length} variants available...`);
 
       const processedFiles = [];
       let successCount = 0;
       let errorCount = 0;
       let matchedCount = 0;
+      let skippedCount = 0;
 
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         const fileNumber = i + 1;
 
-        addProgressLog(`🖼️ File ${fileNumber}/${files.length}`, `Processing: ${file.name}`);
+        logProgress(`🖼️ File ${fileNumber}/${files.length}`, `Processing: ${file.name}`);
 
         try {
           // Step 3.3.1: Validate file
-          addProgressLog(`  🔍 Validation ${fileNumber}`, `Kiểm tra ${file.name} (${file.mimeType}, ${file.size} bytes)`);
+          logProgress(`  🔍 Validation ${fileNumber}`, `Kiểm tra ${file.name} (${file.mimeType}, ${file.size} bytes)`);
 
           // Step 3.3.2: Simulate file processing with enhanced SKU matching
           const simulatedResult = await simulateFileProcessing(file, config, availableSKUs);
@@ -572,22 +540,26 @@ export default function UploadPage() {
             }
             // Enhanced success log with detailed product matching
           if (simulatedResult.skuMatch) {
-            addProgressLog(`  ✅ Success ${fileNumber}`, `${file.name} → Product: "${simulatedResult.skuMatch.productTitle}"`);
-            addProgressLog(`     📦 SKU: ${simulatedResult.skuMatch.sku}`, `• Variant: ${simulatedResult.skuMatch.color || 'Default'} • Price: $${simulatedResult.skuMatch.price} • Stock: ${simulatedResult.skuMatch.inventoryQuantity}`);
+            logProgress(`  ✅ Success ${fileNumber}`, `${file.name} → Product: "${simulatedResult.skuMatch.productTitle}"`);
+            logProgress(`     📦 SKU: ${simulatedResult.skuMatch.sku}`, `• Variant: ${simulatedResult.skuMatch.color || 'Default'} • Price: $${simulatedResult.skuMatch.price} • Stock: ${simulatedResult.skuMatch.inventoryQuantity}`);
           } else {
-            addProgressLog(`  ✅ Success ${fileNumber}`, `${file.name} → No SKU match (general upload)`);
+            logProgress(`  ✅ Success ${fileNumber}`, `${file.name} → No SKU match (general upload)`);
           }
           } else if (simulatedResult.status === 'warning') {
             successCount++; // Warnings still count as success
+          } else if (simulatedResult.status === 'skipped') {
+            skippedCount++;
+            logProgress(`  ⏭️ Skipped ${fileNumber}`, `${file.name} → ${simulatedResult.message}`);
+            // Skipped files don't count as success or error
             if (simulatedResult.skuMatch) {
-              addProgressLog(`  ⚠️ Warning ${fileNumber}`, `${file.name} → Product: "${simulatedResult.skuMatch.productTitle}"`);
-              addProgressLog(`     ⚠️ Issue: ${simulatedResult.message}`);
+              logProgress(`  ⚠️ Warning ${fileNumber}`, `${file.name} → Product: "${simulatedResult.skuMatch.productTitle}"`);
+              logProgress(`     ⚠️ Issue: ${simulatedResult.message}`);
             } else {
-              addProgressLog(`  ⚠️ Warning ${fileNumber}`, `${file.name} → ${simulatedResult.message}`);
+              logProgress(`  ⚠️ Warning ${fileNumber}`, `${file.name} → ${simulatedResult.message}`);
             }
           } else {
             errorCount++;
-            addProgressLog(`  ❌ Error ${fileNumber}`, `${file.name} → ${simulatedResult.message}`);
+            logProgress(`  ❌ Error ${fileNumber}`, `${file.name} → ${simulatedResult.message}`);
           }
 
           // Add small delay to simulate processing time
@@ -596,7 +568,7 @@ export default function UploadPage() {
         } catch (error) {
           errorCount++;
           const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-          addProgressLog(`  💥 Exception ${fileNumber}`, `${file.name} -> ${errorMessage}`);
+          logProgress(`  💥 Exception ${fileNumber}`, `${file.name} -> ${errorMessage}`);
           processedFiles.push({
             googleFileId: file.id,
             fileName: file.name,
@@ -609,7 +581,7 @@ export default function UploadPage() {
       const processingTime = Date.now() - startTime;
 
       // Step 3.4: Create final results
-      addProgressLog('📈 Final Summary', `Đã xử lý xong: ${successCount} thành công, ${errorCount} lỗi, ${matchedCount} matched SKU trong ${processingTime}ms`);
+      logProgress('📈 Final Summary', `Đã xử lý xong: ${successCount} sẽ upload, ${skippedCount} bị skip, ${errorCount} lỗi, ${matchedCount} matched SKU trong ${processingTime}ms`);
 
       const results = {
         dryRun: true,
@@ -617,20 +589,21 @@ export default function UploadPage() {
         config,
         totalFiles: files.length,
         successCount,
+        skippedCount, // NEW: Number of files skipped (no SKU match)
         errorCount,
-        matchedCount, // NEW: Number of files with SKU matches
+        matchedCount, // Number of files with SKU matches
         processingTime,
         results: processedFiles,
         timestamp: new Date().toISOString()
       };
 
-      addProgressLog('✅ Simulation Complete', `Tạo kết quả thành công với ${processedFiles.length} file records`);
+      logProgress('✅ Simulation Complete', `Tạo kết quả thành công với ${processedFiles.length} file records`);
       return results;
 
     } catch (error) {
       const processingTime = Date.now() - startTime;
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      addProgressLog('❌ SIMULATION FAILED', `${errorMessage} (sau ${processingTime}ms)`);
+      logProgress('❌ SIMULATION FAILED', `${errorMessage} (sau ${processingTime}ms)`);
       console.error(`[DRY RUN] Simulation failed:`, error);
 
       return {
@@ -760,19 +733,19 @@ export default function UploadPage() {
           matchedSKU = bestMatch || specificMatches[0]?.sku || potentialMatches[0];
 
           // Log matching details
-          if (matchedMatch) {
-            addProgressLog(`  🎯 Smart Match`, `Selected SKU: ${matchedMatch.sku} → Product: ${matchedMatch.productTitle}`);
-            if (matchedMatch.color) {
-              addProgressLog(`     🎨 Color Variant`, `${matchedMatch.color} • Price: $${matchedMatch.price} • Stock: ${matchedMatch.inventoryQuantity}`);
+          if (bestMatch) {
+            logProgress(`  🎯 Smart Match`, `Selected SKU: ${bestMatch.sku} → Product: ${bestMatch.productTitle}`);
+            if (bestMatch.color) {
+              logProgress(`     🎨 Color Variant`, `${bestMatch.color} • Price: $${bestMatch.price} • Stock: ${bestMatch.inventoryQuantity}`);
             }
           } else {
-            addProgressLog(`  🎲 Fallback Match`, `Using: ${matchedSKU.sku} → Product: ${matchedSKU.productTitle}`);
+            logProgress(`  🎲 Fallback Match`, `Using: ${matchedSKU.sku} → Product: ${matchedSKU.productTitle}`);
           }
         } else if (potentialMatches.length === 1) {
           matchedSKU = potentialMatches[0];
-          addProgressLog(`  ✅ Unique Match`, `Found single match: ${matchedSKU.sku} → Product: ${matchedSKU.productTitle}`);
+          logProgress(`  ✅ Unique Match`, `Found single match: ${matchedSKU.sku} → Product: ${matchedSKU.productTitle}`);
           if (matchedSKU.color) {
-            addProgressLog(`     🎨 Only Variant`, `${matchedSKU.color} • Price: $${matchedSKU.price} • Stock: ${matchedSKU.inventoryQuantity}`);
+            logProgress(`     🎨 Only Variant`, `${matchedSKU.color} • Price: $${matchedSKU.price} • Stock: ${matchedSKU.inventoryQuantity}`);
           }
         }
 
@@ -805,15 +778,22 @@ export default function UploadPage() {
     const estimatedUploadTime = Math.round(fileSize / (1024 * 1024) * 2);
     const wouldOverwrite = config.conflictResolution === 'overwrite';
 
-    // Determine success status
+    // Determine success status - SKIP if no SKU match
     let status = 'success';
-    let message = matchedSKU
-      ? `Would upload and associate with ${matchedSKU.color ? matchedSKU.color + ' variant' : 'variant'}: ${matchedSKU.sku} (${matchedSKU.productTitle})`
-      : 'Would upload without SKU association';
+    let message = '';
+    let shouldUpload = true;
 
-    if (matchedSKU && matchedSKU.inventoryQuantity === 0) {
-      status = 'warning';
-      message += ` (Warning: SKU is out of stock)`;
+    if (!matchedSKU) {
+      status = 'skipped';
+      message = 'Skipped: No SKU match found';
+      shouldUpload = false;
+    } else {
+      message = `Would upload and associate with ${matchedSKU.color ? matchedSKU.color + ' variant' : 'variant'}: ${matchedSKU.sku} (${matchedSKU.productTitle})`;
+
+      if (matchedSKU.inventoryQuantity === 0) {
+        status = 'warning';
+        message += ` (Warning: SKU is out of stock)`;
+      }
     }
 
     return {
@@ -822,9 +802,10 @@ export default function UploadPage() {
       fileSize,
       mimeType,
       status,
-      shopifyFileId: simulatedShopifyFileId,
-      shopifyUrl: simulatedUrl,
+      shopifyFileId: shouldUpload ? simulatedShopifyFileId : null,
+      shopifyUrl: shouldUpload ? simulatedUrl : null,
       message,
+      shouldUpload, // New field to indicate if file should be uploaded
       skuMatch: matchDetails, // Enhanced SKU match details
       processingDetails: {
         skuTarget: config.skuTarget,
@@ -914,13 +895,12 @@ export default function UploadPage() {
                 {isSubmitting ? "Uploading..." : "Start Upload"}
               </s-button>
               <s-button
-                variant={dryUploadSKUs.length > 0 ? "secondary" : "plain"}
+                variant="secondary"
                 onClick={async () => await handleDryUpload()}
                 disabled={isSubmitting || !selectedFolder || !isValid}
                 loading={isDryRunning}
-                tone={dryUploadSKUs.length === 0 ? "critical" : undefined}
               >
-                🧪 Dry Upload {dryUploadSKUs.length === 0 && "(No SKUs)"}
+                🧪 Dry Upload
               </s-button>
               <s-button
                 variant="plain"
@@ -933,244 +913,6 @@ export default function UploadPage() {
           </div>
         </form>
       </s-section>
-
-      {/* SKU Status Section */}
-      <s-section heading="🛒 Shopify SKU Status">
-        <s-box padding="base" borderWidth="base" borderRadius="base" background="info-subdued">
-          <s-stack direction="block" gap="small">
-            <s-heading level="4">Wallpaper SKU Data Status</s-heading>
-
-            {isLoadingSKUs ? (
-              <s-stack direction="inline" alignment="center" gap="base">
-                <s-box padding="base" background="surface" borderRadius="base">
-                  <s-stack direction="inline" alignment="center" gap="small">
-                    <s-text as="span">🔄 Loading Wallpaper SKU data from Shopify...</s-text>
-                  </s-stack>
-                </s-box>
-              </s-stack>
-            ) : skuError ? (
-              <s-stack direction="block" gap="base">
-                <s-box padding="base" background="critical-subdued" borderRadius="base">
-                  <s-paragraph tone="critical">
-                    <strong>❌ SKU Fetch Error:</strong> {skuError}
-                  </s-paragraph>
-                </s-box>
-                <s-button
-                  variant="primary"
-                  onClick={() => fetchSKUsFromShopify()}
-                  disabled={isLoadingSKUs}
-                >
-                  🔄 Retry Fetching SKUs
-                </s-button>
-              </s-stack>
-            ) : skuData.length > 0 ? (
-              <s-stack direction="block" gap="base">
-                <s-box padding="base" background="success-subdued" borderRadius="base">
-                  <s-paragraph tone="success">
-                    <strong>✅ Wallpaper SKU Data Available:</strong> {flattenedSKUs.length} variants from {skuData.length} products
-                  </s-paragraph>
-                </s-box>
-                <s-stack direction="inline" gap="base">
-                  <s-button
-                    variant="plain"
-                    onClick={() => {
-                      console.log('SKU Data:', skuData);
-                      alert('SKU data logged to console');
-                    }}
-                  >
-                    📊 View Wallpaper SKUs in Console
-                  </s-button>
-                  <s-button
-                    variant="secondary"
-                    onClick={() => setSkuData([])}
-                  >
-                    🗑️ Clear Wallpaper SKU Data
-                  </s-button>
-                  <s-button
-                    variant="primary"
-                    onClick={() => fetchSKUsFromShopify()}
-                    disabled={isLoadingSKUs}
-                  >
-                    🔄 Refresh Wallpaper SKUs
-                  </s-button>
-                </s-stack>
-              </s-stack>
-            ) : (
-              <s-stack direction="block" gap="base">
-                <s-box padding="base" background="surface" borderRadius="base">
-                  <s-paragraph>
-                    <strong>ℹ️ No Wallpaper SKU Data:</strong> Click the button below to fetch Wallpaper SKUs from Shopify
-                  </s-paragraph>
-                </s-box>
-                <s-button
-                  variant="primary"
-                  onClick={() => fetchSKUsFromShopify()}
-                  disabled={isLoadingSKUs}
-                >
-                  🛒 Fetch Wallpaper SKUs from Shopify
-                </s-button>
-              </s-stack>
-            )}
-          </s-stack>
-        </s-box>
-      </s-section>
-
-      {/* Dry Upload SKU Management Section */}
-      <s-section heading="🎯 Dry Upload SKU Management">
-        <s-box padding="base" borderWidth="base" borderRadius="base" background="info-subdued">
-          <s-stack direction="block" gap="small">
-            <s-heading level="4">Dry Upload Processing Data</s-heading>
-            <s-paragraph>
-              <strong>💡 Separate from UI display - This data is used specifically for Dry Upload processing</strong>
-            </s-paragraph>
-
-            {dryUploadSKUs.length > 0 ? (
-              <s-stack direction="block" gap="base">
-                <s-box padding="base" background="success-subdued" borderRadius="base">
-                  <s-paragraph tone="success">
-                    <strong>✅ Dry Upload SKUs Ready:</strong> {dryUploadSKUs.length} variants available for processing
-                  </s-paragraph>
-                </s-box>
-                <s-stack direction="inline" gap="base">
-                  <s-button
-                    variant="plain"
-                    onClick={() => {
-                      console.log('Dry Upload SKUs:', dryUploadSKUs);
-                      alert('Dry Upload SKU data logged to console');
-                    }}
-                  >
-                    📊 View Dry Upload SKUs
-                  </s-button>
-                  <s-button
-                    variant="secondary"
-                    onClick={() => setDryUploadSKUs([])}
-                  >
-                    🗑️ Clear Dry Upload SKUs
-                  </s-button>
-                  <s-button
-                    variant="primary"
-                    onClick={() => loadSKUsForDryUpload()}
-                    disabled={isLoadingSKUs}
-                  >
-                    🔄 Refresh Dry Upload SKUs
-                  </s-button>
-                </s-stack>
-              </s-stack>
-            ) : (
-              <s-stack direction="block" gap="base">
-                <s-box padding="base" background="critical-subdued" borderRadius="base">
-                  <s-paragraph tone="critical">
-                    <strong>❌ No Dry Upload SKUs:</strong> Dry Upload will process files as general uploads without SKU matching
-                  </s-paragraph>
-                </s-box>
-                <s-button
-                  variant="primary"
-                  onClick={() => loadSKUsForDryUpload()}
-                  disabled={isLoadingSKUs}
-                >
-                  🎯 Load SKUs for Dry Upload
-                </s-button>
-              </s-stack>
-            )}
-          </s-stack>
-        </s-box>
-      </s-section>
-
-      {/* Dry Upload Progress Section */}
-      {dryUploadProgress.length > 0 && (
-        <s-section heading="🧪 Dry Upload Progress">
-          <s-box padding="base" borderWidth="base" borderRadius="base" background="info-subdued">
-            <s-stack direction="block" gap="small">
-              <s-heading level="4">📋 Progress Logs</s-heading>
-
-              <s-box
-                padding="base"
-                background="surface"
-                borderRadius="base"
-                style={{
-                  maxHeight: '400px',
-                  overflow: 'auto'
-                }}
-              >
-                <div style={{
-                  fontFamily: 'monospace',
-                  fontSize: '12px',
-                  lineHeight: '1.4',
-                  whiteSpace: 'pre-wrap'
-                }}>
-                  {dryUploadProgress.map((log, index) => (
-                    <div
-                      key={index}
-                      style={{
-                        marginBottom: '4px',
-                        padding: '2px 0',
-                        borderBottom: '1px solid #e5e7eb',
-                        color: log.includes('❌') || log.includes('💥') ? '#dc2626' :
-                               log.includes('✅') ? '#059669' :
-                               log.includes('⚠️') || log.includes('ℹ️') ? '#d97706' : '#374151'
-                      }}
-                    >
-                      {log}
-                    </div>
-                  ))}
-                </div>
-              </s-box>
-
-              <s-stack direction="inline" gap="base">
-                <s-button
-                  variant="plain"
-                  onClick={() => {
-                    // Copy logs to clipboard
-                    navigator.clipboard.writeText(dryUploadProgress.join('\n'));
-                    alert('Progress logs copied to clipboard!');
-                  }}
-                >
-                  📋 Copy Logs
-                </s-button>
-                <s-button
-                  variant="secondary"
-                  onClick={() => setDryUploadProgress([])}
-                >
-                  Clear Logs
-                </s-button>
-              </s-stack>
-            </s-stack>
-          </s-box>
-        </s-section>
-      )}
-
-      {/* Debug Information Section */}
-      {process.env.NODE_ENV === 'development' && (
-        <s-section heading="Debug Information">
-          <s-box padding="base" borderWidth="base" borderRadius="base" background="info-subdued">
-            <s-stack direction="block" gap="small">
-              <s-heading level="5">🔍 Debug Status</s-heading>
-              <s-paragraph style={{ fontSize: '13px' }}>
-                • Form Valid: <strong>{isValid ? '✅ Yes' : '❌ No'}</strong><br />
-                • Selected Folder: <strong>{selectedFolder ? '✅ ' + selectedFolder : '❌ None'}</strong><br />
-                • Is Submitting: <strong>{isSubmitting ? '✅ Yes' : '❌ No'}</strong><br />
-                • Dry Upload Disabled: <strong>{(isSubmitting || !selectedFolder || !isValid) ? '✅ Yes' : '❌ No'}</strong>
-              </s-paragraph>
-              <s-stack direction="inline" gap="base">
-                <s-button
-                  variant="plain"
-                  onClick={() => {
-                    console.log('Current state:', {
-                      isValid,
-                      selectedFolder,
-                      isSubmitting,
-                      formData: getValues()
-                    });
-                    alert('Debug info logged to console');
-                  }}
-                >
-                  📋 Log State
-                </s-button>
-              </s-stack>
-            </s-stack>
-          </s-box>
-        </s-section>
-      )}
 
       {/* Dry Upload Results Section */}
       {dryResults && (
@@ -1187,12 +929,24 @@ export default function UploadPage() {
                 </s-box>
                 <s-box padding="base" background="success-subdued" borderRadius="base">
                   <s-paragraph>
-                    <strong>✅ Would Succeed:</strong> {dryResults.successCount}
+                    <strong>✅ Will Upload:</strong> {dryResults.successCount}
                   </s-paragraph>
                 </s-box>
+                {dryResults.skippedCount > 0 && (
+                  <s-box padding="base" background="warning-subdued" borderRadius="base">
+                    <s-paragraph>
+                      <strong>⏭️ Skipped:</strong> {dryResults.skippedCount}
+                    </s-paragraph>
+                  </s-box>
+                )}
                 <s-box padding="base" background="critical-subdued" borderRadius="base">
                   <s-paragraph>
                     <strong>❌ Would Fail:</strong> {dryResults.errorCount}
+                  </s-paragraph>
+                </s-box>
+                <s-box padding="base" background="surface" borderRadius="base">
+                  <s-paragraph>
+                    <strong>🎯 SKU Matched:</strong> {dryResults.matchedCount}
                   </s-paragraph>
                 </s-box>
                 <s-box padding="base" background="surface" borderRadius="base">
@@ -1255,7 +1009,8 @@ export default function UploadPage() {
                         padding: '4px',
                         borderBottom: '1px solid #e5e7eb',
                         color: result.status === 'success' ? '#059669' :
-       result.status === 'warning' ? '#d97706' : '#dc2626'
+       result.status === 'warning' ? '#d97706' :
+       result.status === 'skipped' ? '#6b7280' : '#dc2626'
                       }}>
                         <strong>{result.fileName}</strong><br />
                         Status: {result.status.toUpperCase()}<br />
