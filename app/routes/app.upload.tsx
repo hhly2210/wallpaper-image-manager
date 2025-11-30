@@ -20,6 +20,7 @@ export default function UploadPage() {
   const {
     register,
     handleSubmit,
+    getValues,
     formState: { errors, isValid },
     reset,
   } = useForm<UploadFormData>({
@@ -115,6 +116,19 @@ export default function UploadPage() {
               </s-button>
               <s-button
                 variant="secondary"
+                onClick={() => {
+                  console.log("Dry upload - simulation mode");
+                  // Just log the form data without actual upload logic
+                  const formData = getValues();
+                  console.log("Dry run with data:", formData);
+                  alert("Dry upload completed! Check console for details.");
+                }}
+                disabled={isSubmitting}
+              >
+                🧪 Dry Upload
+              </s-button>
+              <s-button
+                variant="plain"
                 onClick={() => reset()}
                 disabled={isSubmitting}
               >
@@ -125,13 +139,6 @@ export default function UploadPage() {
         </form>
       </s-section>
 
-      <s-section slot="aside" heading="Upload Settings">
-        <s-paragraph>
-          Configure your upload settings before adding images to your collection.
-        </s-paragraph>
-
-        <s-badge status="info">Tip: Select appropriate settings for best results</s-badge>
-      </s-section>
-    </s-page>
+          </s-page>
   );
 }
