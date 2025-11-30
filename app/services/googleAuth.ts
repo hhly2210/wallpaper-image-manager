@@ -10,7 +10,10 @@ export class GoogleAuthService {
   private tokens: GoogleTokens | null = null;
 
   private constructor() {
-    this.loadTokens();
+    // Only load tokens on client side
+    if (typeof window !== 'undefined') {
+      this.loadTokens();
+    }
   }
 
   static getInstance(): GoogleAuthService {
@@ -21,6 +24,11 @@ export class GoogleAuthService {
   }
 
   private loadTokens(): void {
+    // Only load tokens on client side
+    if (typeof window === 'undefined' || typeof sessionStorage === 'undefined') {
+      return;
+    }
+
     try {
       const stored = sessionStorage.getItem('googleTokens');
       if (stored) {
@@ -33,10 +41,19 @@ export class GoogleAuthService {
   }
 
   private saveTokens(): void {
-    if (this.tokens) {
-      sessionStorage.setItem('googleTokens', JSON.stringify(this.tokens));
-    } else {
-      sessionStorage.removeItem('googleTokens');
+    // Only save tokens on client side
+    if (typeof window === 'undefined' || typeof sessionStorage === 'undefined') {
+      return;
+    }
+
+    try {
+      if (this.tokens) {
+        sessionStorage.setItem('googleTokens', JSON.stringify(this.tokens));
+      } else {
+        sessionStorage.removeItem('googleTokens');
+      }
+    } catch (error) {
+      console.error('Failed to save Google tokens:', error);
     }
   }
 
@@ -110,7 +127,15 @@ export class GoogleAuthService {
 
   clearTokens(): void {
     this.tokens = null;
-    sessionStorage.removeItem('googleTokens');
+
+    // Only remove from sessionStorage on client side
+    if (typeof window !== 'undefined' && typeof sessionStorage !== 'undefined') {
+      try {
+        sessionStorage.removeItem('googleTokens');
+      } catch (error) {
+        console.error('Failed to clear Google tokens from sessionStorage:', error);
+      }
+    }
   }
 
   getAuthUrl(shop: string = 'localhost'): string {

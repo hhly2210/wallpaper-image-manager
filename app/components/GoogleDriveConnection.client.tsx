@@ -107,6 +107,13 @@ export default function GoogleDriveConnection() {
     setFolders([]);
     setSelectedFolder('');
     setLastError(null); // Clear any errors
+
+    // Clear saved folder from localStorage (client-side only)
+    try {
+      localStorage.removeItem('selectedGoogleDriveFolder');
+    } catch (error) {
+      console.error('Failed to clear selected folder from localStorage:', error);
+    }
   };
 
   const handleFolderChange = (folderId: string) => {
@@ -115,6 +122,17 @@ export default function GoogleDriveConnection() {
       setSelectedFolder(folderId);
       setLastError(null); // Clear any previous errors
       console.log(`[UI] Folder changed to: ${folderId}`);
+
+      // Save selected folder to localStorage for other components to access (client-side only)
+      try {
+        if (folderId) {
+          localStorage.setItem('selectedGoogleDriveFolder', folderId);
+        } else {
+          localStorage.removeItem('selectedGoogleDriveFolder');
+        }
+      } catch (error) {
+        console.error('Failed to save selected folder to localStorage:', error);
+      }
 
       // Load image count for the selected folder
       if (folderId) {
