@@ -102,7 +102,7 @@ export async function action({ request }: { request: Request }) {
 
       console.log(`[${requestId}] Processing Wallpaper product: "${product.title}" (${product.productType})`);
 
-      // Filter variants with SKUs
+      // Filter variants with SKUs and Color option
       const variantsWithSKUs = [];
 
       variants.forEach((variantEdge: any) => {
@@ -110,19 +110,34 @@ export async function action({ request }: { request: Request }) {
 
         // Only include variants with SKUs
         if (variant.sku && variant.sku.trim()) {
-          variantsWithSKUs.push({
-            id: variant.id,
-            sku: variant.sku.trim(),
-            title: variant.title,
-            price: variant.price,
-            inventoryQuantity: variant.inventoryQuantity,
-            createdAt: variant.createdAt,
-            updatedAt: variant.updatedAt,
-            options: {
-              selectedOptions: variant.selectedOptions || []
-            }
-          });
-          totalVariants++;
+          // Check if variant has "Color" option
+          const hasColorOption = variant.selectedOptions?.some((option: any) =>
+            option.name.toLowerCase() === 'color'
+          );
+
+          // Only include variants that have a Color option
+          if (hasColorOption) {
+            const colorOption = variant.selectedOptions?.find((option: any) =>
+              option.name.toLowerCase() === 'color'
+            );
+
+            variantsWithSKUs.push({
+              id: variant.id,
+              sku: variant.sku.trim(),
+              title: variant.title,
+              price: variant.price,
+              inventoryQuantity: variant.inventoryQuantity,
+              createdAt: variant.createdAt,
+              updatedAt: variant.updatedAt,
+              color: colorOption?.value || null, // Extract color value
+              options: {
+                selectedOptions: variant.selectedOptions || []
+              }
+            });
+            totalVariants++;
+          } else {
+            console.log(`[${requestId}] Skipping variant without Color option: ${variant.sku}`);
+          }
         }
       });
 
@@ -165,11 +180,12 @@ export async function action({ request }: { request: Request }) {
         wallpaperProducts: totalProducts, // All products are wallpaper due to query filter
         totalVariants,
         hasQuery: !!query,
-        filterType: 'wallpaper-products',
+        filterType: 'wallpaper-products-with-color',
         queryUsed: query || buildWallpaperQuery(),
         isRealData: true,
         shop: session.shop,
-        dataStructure: 'products-contain-variants'
+        dataStructure: 'products-contain-variants',
+        colorFilter: 'Only variants with Color option included'
       },
       requestId,
       timestamp: new Date().toISOString()
