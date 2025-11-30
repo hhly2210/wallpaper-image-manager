@@ -8,7 +8,6 @@ const GoogleDriveConnection = lazy(() => import("../components/GoogleDriveConnec
 
 // Zod schema for form validation
 const uploadFormSchema = z.object({
-  category: z.string().min(1, "Please select a category"),
   skuTarget: z.string().min(1, "Please select a SKU target option"),
   conflictResolution: z.string().min(1, "Please select a conflict resolution option"),
 });
@@ -67,28 +66,6 @@ export default function UploadPage() {
       <s-section heading="Upload Configuration">
         <form onSubmit={handleSubmit(onSubmit)}>
           <s-stack direction="block" gap="large">
-            <s-box>
-              <s-label required>Category</s-label>
-              <s-select
-                {...register("category")}
-                placeholder="Select a category"
-                invalid={!!errors.category}
-              >
-                <s-option value="">Choose category...</s-option>
-                <s-option value="nature">Nature</s-option>
-                <s-option value="abstract">Abstract</s-option>
-                <s-option value="architecture">Architecture</s-option>
-                <s-option value="animals">Animals</s-option>
-                <s-option value="technology">Technology</s-option>
-                <s-option value="minimalist">Minimalist</s-option>
-              </s-select>
-              {errors.category && (
-                <s-text-container tone="critical">
-                  <s-text as="p" variant="bodySm">{errors.category.message}</s-text>
-                </s-text-container>
-              )}
-            </s-box>
-
             <s-box>
               <s-label required>SKU Target</s-label>
               <s-select

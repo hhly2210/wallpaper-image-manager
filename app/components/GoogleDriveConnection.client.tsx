@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { googleAuth, type GoogleTokens } from '../services/googleAuth';
-import { listFoldersWithAuth, type GoogleFolder } from '../services/googleDrive';
+import { listFoldersWithAuth, getImageFilesCountInFolder, type GoogleFolder } from '../services/googleDrive';
 
 interface ApiError {
   error: string;
@@ -16,6 +16,8 @@ export default function GoogleDriveConnection() {
   const [isLoadingFolders, setIsLoadingFolders] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [lastError, setLastError] = useState<ApiError | null>(null);
+  const [folderImageCount, setFolderImageCount] = useState<number>(0);
+  const [isLoadingImageCount, setIsLoadingImageCount] = useState(false);
 
   useEffect(() => {
     // Check existing connection status on component mount
@@ -113,6 +115,28 @@ export default function GoogleDriveConnection() {
       setSelectedFolder(folderId);
       setLastError(null); // Clear any previous errors
       console.log(`[UI] Folder changed to: ${folderId}`);
+
+      // Load image count for the selected folder
+      if (folderId) {
+        loadImageCount(folderId);
+      } else {
+        setFolderImageCount(0);
+      }
+    }
+  };
+
+  // Load image count for a folder
+  const loadImageCount = async (folderId: string) => {
+    setIsLoadingImageCount(true);
+    try {
+      const count = await getImageFilesCountInFolder(folderId);
+      setFolderImageCount(count);
+      console.log(`[UI] Folder ${folderId} contains ${count} image files`);
+    } catch (error) {
+      console.error('[UI] Failed to load image count:', error);
+      setFolderImageCount(0);
+    } finally {
+      setIsLoadingImageCount(false);
     }
   };
 
@@ -330,21 +354,33 @@ export default function GoogleDriveConnection() {
                     </s-paragraph>
 
                     <s-box padding="base" background="info-subdued" borderRadius="base">
-                      <s-paragraph style={{ fontSize: '13px' }}>
-                        📤 <strong>All images in this folder will be uploaded to Shopify</strong><br />
-                        This process will upload all image files from the selected folder to your Shopify store.
-                      </s-paragraph>
+                      <s-stack direction="block" gap="small">
+                        <s-paragraph style={{ fontSize: '13px' }}>
+                          📁 <strong>Folder Information:</strong>
+                        </s-paragraph>
+                        <s-stack direction="inline" gap="base" alignment="center">
+                          {isLoadingImageCount ? (
+                            <s-paragraph style={{ fontSize: '13px' }}>
+                              🔍 Counting images...
+                            </s-paragraph>
+                          ) : (
+                            <>
+                              <s-paragraph style={{ fontSize: '13px' }}>
+                                🖼️ <strong>{folderImageCount}</strong> image files
+                              </s-paragraph>
+                              {folderImageCount > 0 && (
+                                <s-badge status="success">Ready to upload</s-badge>
+                              )}
+                              {folderImageCount === 0 && (
+                                <s-badge status="warning">No images found</s-badge>
+                              )}
+                            </>
+                          )}
+                        </s-stack>
+                                              </s-stack>
                     </s-box>
 
-                    <s-button
-                      variant="primary"
-                      onClick={handleUploadToShopify}
-                      loading={isUploading}
-                      size="large"
-                    >
-                      {isUploading ? 'Uploading...' : '🚀 Upload Entire Folder to Shopify'}
-                    </s-button>
-                  </s-stack>
+                                      </s-stack>
                 </s-box>
               )}
 

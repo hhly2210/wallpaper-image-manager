@@ -281,3 +281,34 @@ export const listFoldersWithAuth = async (): Promise<GoogleFolder[]> => {
   }
   return listFolders(accessToken);
 };
+
+// Get image files count in a folder
+export const getImageFilesCountInFolder = async (folderId: string): Promise<number> => {
+  const accessToken = await googleAuth.getValidAccessToken();
+  if (!accessToken) {
+    throw new Error('Not authenticated with Google Drive');
+  }
+
+  try {
+    const response = await fetch('/api/drive/files/count', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        accessToken,
+        folderId,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to get files count');
+    }
+
+    const data = await response.json();
+    return data.count || 0;
+  } catch (error) {
+    console.error('Error getting files count:', error);
+    return 0;
+  }
+};
