@@ -73,7 +73,6 @@ export default function UploadPage() {
                 {...register("category")}
                 placeholder="Select a category"
                 invalid={!!errors.category}
-                label="Category"
               >
                 <s-option value="">Choose category...</s-option>
                 <s-option value="nature">Nature</s-option>
@@ -96,7 +95,6 @@ export default function UploadPage() {
                 {...register("skuTarget")}
                 placeholder="Select SKU target option"
                 invalid={!!errors.skuTarget}
-                label="SKU Target"
               >
                 <s-option value="">Choose SKU target...</s-option>
                 <s-option value="exact-sku">Exact SKU Match</s-option>
@@ -115,7 +113,6 @@ export default function UploadPage() {
                 {...register("conflictResolution")}
                 placeholder="Select conflict resolution option"
                 invalid={!!errors.conflictResolution}
-                label="Conflict Resolution"
               >
                 <s-option value="">Choose conflict resolution...</s-option>
                 <s-option value="overwrite">Overwrite</s-option>
