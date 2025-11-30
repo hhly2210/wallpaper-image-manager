@@ -21,6 +21,9 @@ export default function UploadPage() {
   const [dryResults, setDryResults] = useState<any>(null);
   const [selectedFolder, setSelectedFolder] = useState<string>('');
   const [dryUploadProgress, setDryUploadProgress] = useState<string[]>([]);
+  const [skuData, setSkuData] = useState<any[]>([]);
+  const [isLoadingSKUs, setIsLoadingSKUs] = useState(false);
+  const [skuError, setSkuError] = useState<string | null>(null);
 
   const {
     register,
@@ -150,6 +153,57 @@ export default function UploadPage() {
     }
   };
 
+  // Function to fetch SKU data from Shopify via server proxy
+  const fetchSKUsFromShopify = async (query?: string) => {
+    setIsLoadingSKUs(true);
+    setSkuError(null);
+
+    try {
+      addProgressLog('🛒 Shopify Sync', 'Bắt đầu lấy danh sách SKU từ Shopify...');
+
+      const response = await fetch('/api/shopify/skus', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          // Add Shopify session headers if available
+          // 'X-Shopify-Session': 'your-session-data',
+          // 'X-Shopify-Access-Token': 'your-access-token'
+        },
+        body: JSON.stringify({
+          limit: 250,
+          query: query || null
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+
+      if (data.success && data.data) {
+        setSkuData(data.data);
+        addProgressLog('✅ Shopify Sync', `Đã lấy ${data.data.length} SKU từ Shopify`);
+        addProgressLog('📊 SKU Summary', `- Total Products: ${data.summary?.totalProducts || 0}- Wallpaper Products: ${data.summary?.wallpaperProducts || 0}- Total Variants: ${data.summary?.totalVariants || 0}- Valid SKUs: ${data.data.length}`);
+        addProgressLog('🏷️ Filter Applied', `Chỉ lấy products với Product Organization = "Wallpaper"`);
+
+        return data.data;
+      } else {
+        throw new Error(data.error || 'Invalid response format');
+      }
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      setSkuError(errorMessage);
+      addProgressLog('❌ Shopify Sync Error', `Không thể lấy SKU: ${errorMessage}`);
+      console.error('Failed to fetch SKUs:', error);
+      return [];
+    } finally {
+      setIsLoadingSKUs(false);
+    }
+  };
+
   // Client-side dry upload simulation
   const handleDryUpload = async () => {
     // Only run on client side
@@ -163,8 +217,20 @@ export default function UploadPage() {
     setDryUploadProgress([]); // Clear previous progress
 
     try {
-      // Bước 1: Validate input
-      addProgressLog('BƯỚC 1', 'Kiểm tra đầu vào và form configuration');
+      // Bước 1: Validate input và fetch SKU data
+      addProgressLog('BƯỚC 1', 'Kiểm tra đầu vào và lấy danh sách SKU');
+
+      // Fetch SKU data if not already loaded
+      if (skuData.length === 0 && !isLoadingSKUs && !skuError) {
+        addProgressLog('🛒 SKU Sync', 'Đang đồng bộ dữ liệu SKU từ Shopify...');
+        const fetchedSKUs = await fetchSKUsFromShopify();
+
+        if (fetchedSKUs.length === 0) {
+          addProgressLog('⚠️ SKU Warning', 'Không có dữ liệu SKU nào từ Shopify, sẽ tiếp tục với simulation');
+        }
+      } else if (skuData.length > 0) {
+        addProgressLog('✅ SKU Cache', `Sử dụng ${skuData.length} SKU đã được tải từ trước`);
+      }
 
       const formData = getValues();
       const selectedFolderId = getSelectedFolder();
@@ -207,7 +273,8 @@ export default function UploadPage() {
       const dryUploadResults = await simulateFolderUpload(
         selectedFolderId,
         accessToken,
-        formData
+        formData,
+        skuData // Pass SKU data to simulation
       );
 
       addProgressLog('✅ API Connection', 'Đã kết nối thành công đến Google Drive API');
@@ -261,7 +328,8 @@ export default function UploadPage() {
   const simulateFolderUpload = async (
     folderId: string,
     accessToken: string,
-    config: UploadFormData
+    config: UploadFormData,
+    availableSKUs: any[] = []
   ) => {
     const startTime = Date.now();
     addProgressLog('🔍 API Request', `Bắt đầu gọi Google Drive API cho folder: ${folderId}`);
@@ -311,8 +379,8 @@ export default function UploadPage() {
         };
       }
 
-      // Step 3.3: Xử lý từng file
-      addProgressLog('🔄 File Processing', `Bắt đầu xử lý ${files.length} files...`);
+      // Step 3.3: Xử lý từng file với SKU matching
+      addProgressLog('🔄 File Processing', `Bắt đầu xử lý ${files.length} files với ${availableSKUs.length} SKU available...`);
 
       const processedFiles = [];
       let successCount = 0;
@@ -328,8 +396,8 @@ export default function UploadPage() {
           // Step 3.3.1: Validate file
           addProgressLog(`  🔍 Validation ${fileNumber}`, `Kiểm tra ${file.name} (${file.mimeType}, ${file.size} bytes)`);
 
-          // Step 3.3.2: Simulate file processing
-          const simulatedResult = await simulateFileProcessing(file, config);
+          // Step 3.3.2: Simulate file processing with SKU matching
+          const simulatedResult = await simulateFileProcessing(file, config, availableSKUs);
           processedFiles.push(simulatedResult);
 
           if (simulatedResult.status === 'success') {
@@ -396,8 +464,8 @@ export default function UploadPage() {
     }
   };
 
-  // Simulate individual file processing
-  const simulateFileProcessing = async (file: any, config: UploadFormData) => {
+  // Simulate individual file processing with SKU matching
+  const simulateFileProcessing = async (file: any, config: UploadFormData, availableSKUs: any[] = []) => {
     const fileName = file.name || '';
     const fileSize = parseInt(file.size) || 0;
     const mimeType = file.mimeType || '';
@@ -449,36 +517,84 @@ export default function UploadPage() {
 
     // addProgressLog(`  ✅ File Validation Passed ${fileName}`, 'Tất cả validation thành công');
 
-    // Step: Simulate Shopify upload processing
-    const simulatedShopifyFileId = `shopify_dry_${file.id}_${Date.now()}`;
-    const simulatedUrl = `https://cdn.shopify.com/s/files/1/0000/0000/files/${encodeURIComponent(fileName)}?v=${Date.now()}`;
+    // Step: SKU matching logic
+    let matchedSKU = null;
+    let skuMatchType = 'none';
 
-    // Simulate different processing based on configuration
+    if (availableSKUs.length > 0) {
+      const fileNameWithoutExt = fileName.replace(/\.[^/.]+$/, '').toLowerCase(); // Remove extension
+
+      if (config.skuTarget === 'exact-sku') {
+        // Exact match with SKU
+        matchedSKU = availableSKUs.find(sku =>
+          sku.sku.toLowerCase() === fileNameWithoutExt ||
+          sku.sku.toLowerCase() === fileName.toLowerCase()
+        );
+        skuMatchType = matchedSKU ? 'exact' : 'none';
+
+      } else if (config.skuTarget === 'contains-sku') {
+        // Contains match with SKU
+        matchedSKU = availableSKUs.find(sku =>
+          fileNameWithoutExt.includes(sku.sku.toLowerCase()) ||
+          sku.sku.toLowerCase().includes(fileNameWithoutExt) ||
+          fileName.toLowerCase().includes(sku.sku.toLowerCase()) ||
+          sku.sku.toLowerCase().includes(fileName.toLowerCase())
+        );
+        skuMatchType = matchedSKU ? 'contains' : 'none';
+      }
+
+      if (matchedSKU) {
+        addProgressLog(`  🎯 SKU Matched ${fileName}`, `Found ${skuMatchType} match: ${matchedSKU.sku} -> ${matchedSKU.productTitle}`);
+      } else {
+        addProgressLog(`  ❓ SKU Not Found ${fileName}`, `No ${config.skuTarget} match in ${availableSKUs.length} SKUs`);
+      }
+    } else {
+      addProgressLog(`  ⚠️ No SKU Data ${fileName}`, 'No SKU data available for matching');
+    }
+
+    // Step: Simulate Shopify upload processing
+    const simulatedShopifyFileId = matchedSKU
+      ? `shopify_${matchedSKU.id}_${file.id}_${Date.now()}`
+      : `shopify_dry_${file.id}_${Date.now()}`;
+
+    const simulatedUrl = matchedSKU
+      ? `https://cdn.shopify.com/s/files/1/0000/0000/files/${encodeURIComponent(fileName)}?v=${Date.now()}&sku=${matchedSKU.sku}`
+      : `https://cdn.shopify.com/s/files/1/0000/0000/files/${encodeURIComponent(fileName)}?v=${Date.now()}`;
+
+    // Simulate different processing based on configuration and SKU match
     const estimatedUploadTime = Math.round(fileSize / (1024 * 1024) * 2); // ~2 seconds per MB
     const wouldOverwrite = config.conflictResolution === 'overwrite';
+    const wouldSucceed = !matchedSKU || (matchedSKU && (config.skuTarget === 'exact-sku' || config.skuTarget === 'contains-sku'));
 
-    // addProgressLog(`  🛒 Shopify Simulation ${fileName}`, `Target: ${config.skuTarget}, Overwrite: ${wouldOverwrite}, Time: ${estimatedUploadTime}s`);
+    // addProgressLog(`  🛒 Shopify Simulation ${fileName}`, `Target: ${config.skuTarget}, SKU Match: ${skuMatchType}, Overwrite: ${wouldOverwrite}, Time: ${estimatedUploadTime}s`);
 
     return {
       googleFileId: file.id,
       fileName,
       fileSize,
       mimeType,
-      status: 'success',
+      status: wouldSucceed ? 'success' : 'warning',
       shopifyFileId: simulatedShopifyFileId,
       shopifyUrl: simulatedUrl,
-      message: 'Would be uploaded successfully',
+      message: matchedSKU
+        ? `Would upload and associate with SKU: ${matchedSKU.sku} (${matchedSKU.productTitle})`
+        : 'Would upload without SKU association',
       processingDetails: {
         skuTarget: config.skuTarget,
         conflictResolution: config.conflictResolution,
         estimatedUploadTime,
         wouldOverwrite,
+        skuMatch: {
+          type: skuMatchType,
+          matchedSKU: matchedSKU,
+          availableSKUs: availableSKUs.length
+        },
         simulatedProcessing: {
           validation: 'PASSED',
           sizeCheck: `${(fileSize / 1024 / 1024).toFixed(2)}MB`,
           formatCheck: mimeType,
           nameCheck: `${fileName.length} characters`,
-          shopifyDestination: 'CDN upload simulation'
+          shopifyDestination: matchedSKU ? `Product: ${matchedSKU.productTitle}` : 'CDN upload simulation'
         }
       }
     };
@@ -570,6 +686,87 @@ export default function UploadPage() {
             </s-stack>
           </div>
         </form>
+      </s-section>
+
+      {/* SKU Status Section */}
+      <s-section heading="🛒 Shopify SKU Status">
+        <s-box padding="base" borderWidth="base" borderRadius="base" background="info-subdued">
+          <s-stack direction="block" gap="small">
+            <s-heading level="4">Wallpaper SKU Data Status</s-heading>
+
+            {isLoadingSKUs ? (
+              <s-stack direction="inline" alignment="center" gap="base">
+                <s-box padding="base" background="surface" borderRadius="base">
+                  <s-stack direction="inline" alignment="center" gap="small">
+                    <s-text as="span">🔄 Loading Wallpaper SKU data from Shopify...</s-text>
+                  </s-stack>
+                </s-box>
+              </s-stack>
+            ) : skuError ? (
+              <s-stack direction="block" gap="base">
+                <s-box padding="base" background="critical-subdued" borderRadius="base">
+                  <s-paragraph tone="critical">
+                    <strong>❌ SKU Fetch Error:</strong> {skuError}
+                  </s-paragraph>
+                </s-box>
+                <s-button
+                  variant="primary"
+                  onClick={() => fetchSKUsFromShopify()}
+                  disabled={isLoadingSKUs}
+                >
+                  🔄 Retry Fetching SKUs
+                </s-button>
+              </s-stack>
+            ) : skuData.length > 0 ? (
+              <s-stack direction="block" gap="base">
+                <s-box padding="base" background="success-subdued" borderRadius="base">
+                  <s-paragraph tone="success">
+                    <strong>✅ Wallpaper SKU Data Available:</strong> {skuData.length} SKUs loaded from Shopify
+                  </s-paragraph>
+                </s-box>
+                <s-stack direction="inline" gap="base">
+                  <s-button
+                    variant="plain"
+                    onClick={() => {
+                      console.log('SKU Data:', skuData);
+                      alert('SKU data logged to console');
+                    }}
+                  >
+                    📊 View Wallpaper SKUs in Console
+                  </s-button>
+                  <s-button
+                    variant="secondary"
+                    onClick={() => setSkuData([])}
+                  >
+                    🗑️ Clear Wallpaper SKU Data
+                  </s-button>
+                  <s-button
+                    variant="primary"
+                    onClick={() => fetchSKUsFromShopify()}
+                    disabled={isLoadingSKUs}
+                  >
+                    🔄 Refresh Wallpaper SKUs
+                  </s-button>
+                </s-stack>
+              </s-stack>
+            ) : (
+              <s-stack direction="block" gap="base">
+                <s-box padding="base" background="surface" borderRadius="base">
+                  <s-paragraph>
+                    <strong>ℹ️ No Wallpaper SKU Data:</strong> Click the button below to fetch Wallpaper SKUs from Shopify
+                  </s-paragraph>
+                </s-box>
+                <s-button
+                  variant="primary"
+                  onClick={() => fetchSKUsFromShopify()}
+                  disabled={isLoadingSKUs}
+                >
+                  🛒 Fetch Wallpaper SKUs from Shopify
+                </s-button>
+              </s-stack>
+            )}
+          </s-stack>
+        </s-box>
       </s-section>
 
       {/* Dry Upload Progress Section */}
@@ -750,12 +947,16 @@ export default function UploadPage() {
                         marginBottom: '8px',
                         padding: '4px',
                         borderBottom: '1px solid #e5e7eb',
-                        color: result.status === 'success' ? '#059669' : '#dc2626'
+                        color: result.status === 'success' ? '#059669' :
+       result.status === 'warning' ? '#d97706' : '#dc2626'
                       }}>
                         <strong>{result.fileName}</strong><br />
                         Status: {result.status.toUpperCase()}<br />
                         {result.message && `Message: ${result.message}`}
                         {result.shopifyFileId && `Shopify ID: ${result.shopifyFileId}`}
+                        {result.processingDetails?.skuMatch?.matchedSKU && (
+                          <span><br />SKU Match: {result.processingDetails.skuMatch.matchedSKU.sku} ({result.processingDetails.skuMatch.matchedSKU.productTitle})</span>
+                        )}
                       </div>
                     ))}
                   </div>
