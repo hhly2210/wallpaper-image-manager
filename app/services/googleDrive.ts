@@ -24,7 +24,17 @@ export interface GoogleFolder {
 
 // List files from Google Drive (client-side wrapper)
 export const listDriveFiles = async (accessToken: string, folderId?: string): Promise<DriveFile[]> => {
+  const requestId = Math.random().toString(36).substr(2, 9);
+  console.log(`[${requestId}] CLIENT: Starting files list request`, {
+    folderId: folderId || 'root',
+    hasAccessToken: !!accessToken,
+    accessTokenLength: accessToken?.length || 0
+  });
+
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+
     const response = await fetch('/api/drive/files', {
       method: 'POST',
       headers: {
@@ -34,15 +44,69 @@ export const listDriveFiles = async (accessToken: string, folderId?: string): Pr
         accessToken,
         folderId,
       }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    console.log(`[${requestId}] CLIENT: Response received`, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: Object.fromEntries(response.headers.entries())
     });
 
     if (!response.ok) {
-      throw new Error('Failed to list files');
+      let errorData;
+      try {
+        errorData = await response.json();
+      } catch (e) {
+        errorData = { error: 'Unknown error' };
+      }
+
+      console.error(`[${requestId}] CLIENT: API Error Response`, {
+        status: response.status,
+        statusText: response.statusText,
+        errorData
+      });
+
+      throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
     }
 
-    return await response.json();
+    const data = await response.json();
+    console.log(`[${requestId}] CLIENT: Success`, {
+      dataType: typeof data,
+      isArray: Array.isArray(data),
+      hasDataKey: 'data' in data,
+      totalFiles: Array.isArray(data) ? data.length : data.data?.length || 0,
+      requestId: data.requestId
+    });
+
+    // Handle new response format with data wrapper
+    if (data.data && Array.isArray(data.data)) {
+      return data.data;
+    }
+
+    // Handle legacy format (direct array)
+    if (Array.isArray(data)) {
+      return data;
+    }
+
+    console.error(`[${requestId}] CLIENT: Unexpected response format`, data);
+    throw new Error('Invalid response format from API');
+
   } catch (error) {
-    console.error('Error listing Drive files:', error);
+    console.error(`[${requestId}] CLIENT: Request failed`, {
+      error: error instanceof Error ? error.message : 'Unknown error',
+      name: error instanceof Error ? error.name : undefined,
+      stack: error instanceof Error ? error.stack : undefined,
+      isAborted: error instanceof Error && error.name === 'AbortError'
+    });
+
+    // Don't throw if request was aborted (user navigated away)
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw error;
+    }
+
     throw error;
   }
 };
@@ -100,7 +164,16 @@ export const searchFiles = async (accessToken: string, query: string, exactMatch
 
 // Get folders in Drive
 export const listFolders = async (accessToken: string): Promise<GoogleFolder[]> => {
+  const requestId = Math.random().toString(36).substr(2, 9);
+  console.log(`[${requestId}] CLIENT: Starting folders list request`, {
+    hasAccessToken: !!accessToken,
+    accessTokenLength: accessToken?.length || 0
+  });
+
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+
     const response = await fetch('/api/drive/folders', {
       method: 'POST',
       headers: {
@@ -109,15 +182,69 @@ export const listFolders = async (accessToken: string): Promise<GoogleFolder[]> 
       body: JSON.stringify({
         accessToken,
       }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    console.log(`[${requestId}] CLIENT: Response received`, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: Object.fromEntries(response.headers.entries())
     });
 
     if (!response.ok) {
-      throw new Error('Failed to list folders');
+      let errorData;
+      try {
+        errorData = await response.json();
+      } catch (e) {
+        errorData = { error: 'Unknown error' };
+      }
+
+      console.error(`[${requestId}] CLIENT: API Error Response`, {
+        status: response.status,
+        statusText: response.statusText,
+        errorData
+      });
+
+      throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
     }
 
-    return await response.json();
+    const data = await response.json();
+    console.log(`[${requestId}] CLIENT: Success`, {
+      dataType: typeof data,
+      isArray: Array.isArray(data),
+      hasDataKey: 'data' in data,
+      totalFolders: Array.isArray(data) ? data.length : data.data?.length || 0,
+      requestId: data.requestId
+    });
+
+    // Handle new response format with data wrapper
+    if (data.data && Array.isArray(data.data)) {
+      return data.data;
+    }
+
+    // Handle legacy format (direct array)
+    if (Array.isArray(data)) {
+      return data;
+    }
+
+    console.error(`[${requestId}] CLIENT: Unexpected response format`, data);
+    throw new Error('Invalid response format from API');
+
   } catch (error) {
-    console.error('Error listing folders:', error);
+    console.error(`[${requestId}] CLIENT: Request failed`, {
+      error: error instanceof Error ? error.message : 'Unknown error',
+      name: error instanceof Error ? error.name : undefined,
+      stack: error instanceof Error ? error.stack : undefined,
+      isAborted: error instanceof Error && error.name === 'AbortError'
+    });
+
+    // Don't throw if request was aborted (user navigated away)
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw error;
+    }
+
     throw error;
   }
 };

@@ -1,16 +1,21 @@
 import { useState, useEffect } from 'react';
 import { googleAuth, type GoogleTokens } from '../services/googleAuth';
-import { listFoldersWithAuth, listDriveFilesWithAuth, type DriveFile, type GoogleFolder } from '../services/googleDrive';
+import { listFoldersWithAuth, type GoogleFolder } from '../services/googleDrive';
+
+interface ApiError {
+  error: string;
+  requestId?: string;
+  details?: any;
+}
 
 export default function GoogleDriveConnection() {
   const [isConnected, setIsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [folders, setFolders] = useState<GoogleFolder[]>([]);
   const [selectedFolder, setSelectedFolder] = useState<string>('');
-  const [files, setFiles] = useState<DriveFile[]>([]);
   const [isLoadingFolders, setIsLoadingFolders] = useState(false);
-  const [isLoadingFiles, setIsLoadingFiles] = useState(false);
-  const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [lastError, setLastError] = useState<ApiError | null>(null);
 
   useEffect(() => {
     // Check existing connection status on component mount
@@ -22,41 +27,27 @@ export default function GoogleDriveConnection() {
     }
   }, []);
 
-  useEffect(() => {
-    // Load files when folder is selected
-    if (selectedFolder) {
-      loadFiles();
-    } else {
-      setFiles([]);
-    }
-  }, [selectedFolder]);
-
+  
   const loadFolders = async () => {
     setIsLoadingFolders(true);
+    setLastError(null);
     try {
       const foldersList = await listFoldersWithAuth();
       setFolders(foldersList);
+      console.log(`[UI] Successfully loaded ${foldersList.length} folders`);
     } catch (error) {
-      console.error('Failed to load folders:', error);
+      console.error('[UI] Failed to load folders:', error);
+      const apiError: ApiError = {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        details: error
+      };
+      setLastError(apiError);
     } finally {
       setIsLoadingFolders(false);
     }
   };
 
-  const loadFiles = async () => {
-    if (!selectedFolder) return;
-
-    setIsLoadingFiles(true);
-    try {
-      const filesList = await listDriveFilesWithAuth(selectedFolder);
-      setFiles(filesList);
-    } catch (error) {
-      console.error('Failed to load files:', error);
-    } finally {
-      setIsLoadingFiles(false);
-    }
-  };
-
+  
   const handleGoogleConnect = () => {
     setIsLoading(true);
 
@@ -113,46 +104,46 @@ export default function GoogleDriveConnection() {
     setIsConnected(false);
     setFolders([]);
     setSelectedFolder('');
-    setFiles([]);
-    setSelectedFiles([]);
+    setLastError(null); // Clear any errors
   };
 
   const handleFolderChange = (folderId: string) => {
-    setSelectedFolder(folderId);
-    setSelectedFiles([]); // Clear selected files when folder changes
-  };
-
-  const handleFileSelection = (fileId: string, isSelected: boolean) => {
-    if (isSelected) {
-      setSelectedFiles(prev => [...prev, fileId]);
-    } else {
-      setSelectedFiles(prev => prev.filter(id => id !== fileId));
+    // Only update if folder actually changed
+    if (folderId !== selectedFolder) {
+      setSelectedFolder(folderId);
+      setLastError(null); // Clear any previous errors
+      console.log(`[UI] Folder changed to: ${folderId}`);
     }
   };
 
-  const handleSelectAllFiles = () => {
-    if (selectedFiles.length === files.length) {
-      setSelectedFiles([]);
-    } else {
-      setSelectedFiles(files.map(file => file.id!));
-    }
+  // Helper function to get folder info for upload
+  const getFolderInfo = () => {
+    const selectedFolderInfo = folders.find(f => f.id === selectedFolder);
+    return {
+      id: selectedFolder,
+      name: selectedFolderInfo?.name || 'Unknown Folder',
+      isShared: selectedFolderInfo?.isShared || false,
+      owner: selectedFolderInfo?.owner || 'Me'
+    };
   };
 
   const handleUploadToShopify = async () => {
-    if (selectedFiles.length === 0) {
-      alert('Please select at least one file to upload');
+    if (!selectedFolder) {
+      alert('Please select a folder first');
       return;
     }
 
     try {
-      const selectedFilesData = files.filter(file => selectedFiles.includes(file.id!));
+      const folderInfo = getFolderInfo();
 
       // Show confirmation dialog
       const confirmUpload = confirm(
-        `Are you sure you want to upload ${selectedFiles.length} image${selectedFiles.length !== 1 ? 's' : ''} to Shopify?`
+        `Upload all images from "${folderInfo.name}" to Shopify?\n\nThis will upload all images in the selected folder to your Shopify store.`
       );
 
       if (!confirmUpload) return;
+
+      setIsUploading(true);
 
       // Get access token for the upload
       const accessToken = await googleAuth.getValidAccessToken();
@@ -161,16 +152,20 @@ export default function GoogleDriveConnection() {
         throw new Error('Not authenticated with Google Drive');
       }
 
-      // Call upload API
+      // Call upload API with folder instead of specific files
       const response = await fetch('/api/upload/shopify', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          fileIds: selectedFiles,
           folderId: selectedFolder,
+          folderName: folderInfo.name,
+          isShared: folderInfo.isShared,
+          owner: folderInfo.owner,
           accessToken,
+          // Indicate this is a folder upload
+          type: 'folder'
         }),
       });
 
@@ -181,15 +176,16 @@ export default function GoogleDriveConnection() {
       const result = await response.json();
 
       if (result.success) {
-        alert(`${result.message}\n\nUpload complete!`);
-        setSelectedFiles([]); // Clear selection after successful upload
+        alert(`🎉 Upload Complete!\n\n${result.message}\n\nFolder: ${folderInfo.name}`);
       } else {
         throw new Error(result.message || 'Upload failed');
       }
 
     } catch (error) {
       console.error('Upload failed:', error);
-      alert(`Upload failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      alert(`❌ Upload Failed\n\n${error instanceof Error ? error.message : 'Unknown error'}\n\nPlease try again or check your connection.`);
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -288,106 +284,67 @@ export default function GoogleDriveConnection() {
                 ) : (
                   <s-paragraph>No folders found in your Google Drive.</s-paragraph>
                 )}
+
+                {/* Error Display */}
+                {lastError && (
+                  <s-box padding="base" background="critical-subdued" borderRadius="base">
+                    <s-stack direction="block" gap="small">
+                      <s-heading level="4" tone="critical">
+                        ⚠️ Error Loading Data
+                      </s-heading>
+                      <s-paragraph>
+                        <strong>{lastError.error}</strong>
+                        {lastError.requestId && (
+                          <div style={{ fontSize: '11px', marginTop: '4px', color: '#666' }}>
+                            Request ID: {lastError.requestId}
+                          </div>
+                        )}
+                        <div style={{ fontSize: '11px', marginTop: '4px', color: '#666' }}>
+                          Check browser console (F12) for detailed debugging information
+                        </div>
+                      </s-paragraph>
+                      <s-button variant="plain" onClick={() => {
+                        setLastError(null);
+                        loadFolders();
+                      }}>
+                        🔄 Retry
+                      </s-button>
+                    </s-stack>
+                  </s-box>
+                )}
               </s-box>
 
-              {/* Files List */}
+              {/* Upload Action */}
               {selectedFolder && (
                 <s-box padding="base" borderWidth="base" borderRadius="base" background="surface">
-                  <s-stack direction="inline" alignment="center" gap="base">
-                    <s-heading level="4">Images in Folder</s-heading>
-                    {files.length > 0 && (
-                      <s-button variant="plain" onClick={handleSelectAllFiles}>
-                        {selectedFiles.length === files.length ? 'Deselect All' : 'Select All'}
-                      </s-button>
-                    )}
-                  </s-stack>
+                  <s-stack direction="block" gap="base">
+                    <s-heading level="4">Ready to Upload</s-heading>
 
-                  {isLoadingFiles ? (
-                    <s-paragraph>Loading images...</s-paragraph>
-                  ) : files.length > 0 ? (
-                    <s-stack direction="block" gap="small">
-                      <s-paragraph>
-                        {files.length} image{files.length !== 1 ? 's' : ''} found | {selectedFiles.length} selected
-                      </s-paragraph>
-
-                      <div style={{
-                        display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
-                        gap: '12px',
-                        maxHeight: '300px',
-                        overflowY: 'auto',
-                        border: '1px solid #e5e7eb',
-                        borderRadius: '6px',
-                        padding: '12px',
-                        backgroundColor: '#fafafa'
-                      }}>
-                        {files.map((file) => (
-                          <div
-                            key={file.id}
-                            style={{
-                              border: selectedFiles.includes(file.id!) ? '2px solid #3b82f6' : '1px solid #d1d5db',
-                              borderRadius: '8px',
-                              padding: '8px',
-                              cursor: 'pointer',
-                              backgroundColor: selectedFiles.includes(file.id!) ? '#eff6ff' : 'white',
-                              transition: 'all 0.2s ease'
-                            }}
-                            onClick={() => handleFileSelection(
-                              file.id!,
-                              !selectedFiles.includes(file.id!)
-                            )}
-                          >
-                            <img
-                              src={`https://drive.google.com/thumbnail?id=${file.id}&sz=w150`}
-                              alt={file.name}
-                              style={{
-                                width: '100%',
-                                height: '100px',
-                                objectFit: 'cover',
-                                borderRadius: '4px',
-                                marginBottom: '4px'
-                              }}
-                              onError={(e) => {
-                                (e.target as HTMLImageElement).src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTUwIiBoZWlnaHQ9IjEwMCIgdmlld0JveD0iMCAwIDE1MCAxMDAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIxNTAiIGhlaWdodD0iMTAwIiBmaWxsPSIjRjNGNEY2Ii8+CjxwYXRoIGQ9Ik03NSA0MEM5NSA0MCA5NSA2MCA5NSA2MEM5NSA2MCA3NSA2MCA3NSA2MEM3NSA2MCA1NSA2MCA1NSA2MEM1NSA2MCA1NSA0MCA3NSA0MFoiIGZpbGw9IiM5Q0EzQUYiLz4KPHA+PHJlY3QgeD0iNjAiIHk9IjQ1IiB3aWR0aD0iMzAiIGhlaWdodD0iMTAiIGZpbGw9IndoaXRlIi8+CjwvZz4KPC9zdmc+';
-                              }}
-                            />
-                            <div style={{
-                              fontSize: '11px',
-                              fontWeight: '500',
-                              color: '#374151',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap'
-                            }}>
-                              {file.name}
-                            </div>
-                            <div style={{
-                              fontSize: '10px',
-                              color: '#6b7280',
-                              marginTop: '2px'
-                            }}>
-                              {file.size ? `${(parseInt(file.size) / 1024 / 1024).toFixed(1)} MB` : 'Unknown size'}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-
-                      {selectedFiles.length > 0 && (
-                        <s-box padding="base" background="subdued" borderRadius="base">
-                          <s-stack direction="inline" alignment="center" gap="base">
-                            <s-paragraph>
-                              <strong>{selectedFiles.length}</strong> image{selectedFiles.length !== 1 ? 's' : ''} selected
-                            </s-paragraph>
-                            <s-button variant="primary" onClick={handleUploadToShopify}>
-                              Upload to Shopify
-                            </s-button>
-                          </s-stack>
-                        </s-box>
+                    <s-paragraph>
+                      📁 <strong>Selected Folder:</strong> {getFolderInfo().name}
+                      {getFolderInfo().isShared && (
+                        <span style={{ marginLeft: '8px', color: '#6b7280', fontSize: '13px' }}>
+                          ({getFolderInfo().isShared && !getFolderInfo().isOwnedByMe ? `Shared by ${getFolderInfo().owner}` : 'Shared folder'})
+                        </span>
                       )}
-                    </s-stack>
-                  ) : (
-                    <s-paragraph>No images found in this folder.</s-paragraph>
-                  )}
+                    </s-paragraph>
+
+                    <s-box padding="base" background="info-subdued" borderRadius="base">
+                      <s-paragraph style={{ fontSize: '13px' }}>
+                        📤 <strong>All images in this folder will be uploaded to Shopify</strong><br />
+                        This process will upload all image files from the selected folder to your Shopify store.
+                      </s-paragraph>
+                    </s-box>
+
+                    <s-button
+                      variant="primary"
+                      onClick={handleUploadToShopify}
+                      loading={isUploading}
+                      size="large"
+                    >
+                      {isUploading ? 'Uploading...' : '🚀 Upload Entire Folder to Shopify'}
+                    </s-button>
+                  </s-stack>
                 </s-box>
               )}
 
