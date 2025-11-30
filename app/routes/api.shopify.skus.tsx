@@ -101,6 +101,19 @@ export async function action({ request }: { request: Request }) {
       const variants = product.variants?.edges || [];
 
       console.log(`[${requestId}] Processing Wallpaper product: "${product.title}" (${product.productType})`);
+      console.log(`[${requestId}] Product "${product.title}" has ${variants.length} variants total`);
+
+      // Debug: Log first few variants to see their structure
+      if (variants.length > 0) {
+        console.log(`[${requestId}] Sample variants for "${product.title}":`,
+          variants.slice(0, 2).map((v: any) => ({
+            sku: v.node.sku,
+            title: v.node.title,
+            hasColor: v.node.selectedOptions?.some((opt: any) => opt.name.toLowerCase() === 'color'),
+            options: v.node.selectedOptions
+          }))
+        );
+      }
 
       // Filter variants with SKUs and Color option
       const variantsWithSKUs = [];
@@ -108,12 +121,18 @@ export async function action({ request }: { request: Request }) {
       variants.forEach((variantEdge: any) => {
         const variant = variantEdge.node;
 
+        console.log(`[${requestId}] Checking variant: sku="${variant.sku}", title="${variant.title}"`);
+
         // Only include variants with SKUs
         if (variant.sku && variant.sku.trim()) {
+          console.log(`[${requestId}] ✅ Variant has SKU: ${variant.sku}`);
+
           // Check if variant has "Color" option
           const hasColorOption = variant.selectedOptions?.some((option: any) =>
             option.name.toLowerCase() === 'color'
           );
+
+          console.log(`[${requestId}] Color option check: hasColor=${hasColorOption}, options=`, variant.selectedOptions);
 
           // Only include variants that have a Color option
           if (hasColorOption) {
@@ -136,10 +155,14 @@ export async function action({ request }: { request: Request }) {
             });
             totalVariants++;
           } else {
-            console.log(`[${requestId}] Skipping variant without Color option: ${variant.sku}`);
+            console.log(`[${requestId}] ❌ Skipping variant without Color option: sku="${variant.sku}", options=`, variant.selectedOptions);
           }
+        } else {
+          console.log(`[${requestId}] ❌ Skipping variant without SKU: title="${variant.title}"`);
         }
       });
+
+      console.log(`[${requestId}] Product "${product.title}" summary: ${variantsWithSKUs.length} variants with SKUs + Color`);
 
       // Only add product if it has variants with SKUs
       if (variantsWithSKUs.length > 0) {
