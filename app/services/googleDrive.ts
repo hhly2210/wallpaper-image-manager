@@ -1,29 +1,46 @@
-import { google } from 'googleapis';
+import { googleAuth } from './googleAuth';
 
-// Initialize Google Drive API
-export const initDriveService = (accessToken: string) => {
-  const auth = new google.auth.OAuth2();
-  auth.setCredentials({ access_token: accessToken });
+export interface DriveFile {
+  id: string;
+  name: string;
+  mimeType: string;
+  size?: string;
+  createdTime: string;
+  modifiedTime: string;
+  webViewLink?: string;
+  webContentLink?: string;
+}
 
-  return google.drive({ version: 'v3', auth });
-};
+export interface GoogleFolder {
+  id: string;
+  name: string;
+  createdTime: string;
+  isShared: boolean;
+  owner: string;
+  isOwnedByMe: boolean;
+}
 
-// List files from Google Drive
-export const listDriveFiles = async (accessToken: string, folderId?: string) => {
+// These functions are client-side and will call the server-side API
+
+// List files from Google Drive (client-side wrapper)
+export const listDriveFiles = async (accessToken: string, folderId?: string): Promise<DriveFile[]> => {
   try {
-    const drive = initDriveService(accessToken);
-
-    const query = folderId
-      ? `'${folderId}' in parents and (mimeType contains 'image/')`
-      : `(mimeType contains 'image/') and trashed=false`;
-
-    const response = await drive.files.list({
-      q: query,
-      fields: 'files(id, name, mimeType, size, createdTime, modifiedTime, webViewLink, webContentLink)',
-      pageSize: 100,
+    const response = await fetch('/api/drive/files', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        accessToken,
+        folderId,
+      }),
     });
 
-    return response.data.files || [];
+    if (!response.ok) {
+      throw new Error('Failed to list files');
+    }
+
+    return await response.json();
   } catch (error) {
     console.error('Error listing Drive files:', error);
     throw error;
@@ -31,122 +48,109 @@ export const listDriveFiles = async (accessToken: string, folderId?: string) => 
 };
 
 // Get file metadata
-export const getFileInfo = async (accessToken: string, fileId: string) => {
+export const getFileInfo = async (accessToken: string, fileId: string): Promise<DriveFile> => {
   try {
-    const drive = initDriveService(accessToken);
-
-    const response = await drive.files.get({
-      fileId,
-      fields: 'id, name, mimeType, size, createdTime, modifiedTime, webViewLink, webContentLink',
+    const response = await fetch('/api/drive/file', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        accessToken,
+        fileId,
+      }),
     });
 
-    return response.data;
+    if (!response.ok) {
+      throw new Error('Failed to get file info');
+    }
+
+    return await response.json();
   } catch (error) {
     console.error('Error getting file info:', error);
     throw error;
   }
 };
 
-// Download file
-export const downloadFile = async (accessToken: string, fileId: string) => {
-  try {
-    const drive = initDriveService(accessToken);
-
-    const response = await drive.files.get({
-      fileId,
-      alt: 'media',
-    }, { responseType: 'stream' });
-
-    return response.data;
-  } catch (error) {
-    console.error('Error downloading file:', error);
-    throw error;
-  }
-};
-
 // Search files by name or SKU
-export const searchFiles = async (accessToken: string, query: string, exactMatch = false) => {
+export const searchFiles = async (accessToken: string, query: string, exactMatch = false): Promise<DriveFile[]> => {
   try {
-    const drive = initDriveService(accessToken);
-
-    const searchQuery = exactMatch
-      ? `name = '${query}' and (mimeType contains 'image/') and trashed=false`
-      : `name contains '${query}' and (mimeType contains 'image/') and trashed=false`;
-
-    const response = await drive.files.list({
-      q: searchQuery,
-      fields: 'files(id, name, mimeType, size, createdTime, modifiedTime, webViewLink, webContentLink)',
-      pageSize: 50,
+    const response = await fetch('/api/drive/search', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        accessToken,
+        query,
+        exactMatch,
+      }),
     });
 
-    return response.data.files || [];
+    if (!response.ok) {
+      throw new Error('Failed to search files');
+    }
+
+    return await response.json();
   } catch (error) {
     console.error('Error searching files:', error);
     throw error;
   }
 };
 
-// Upload file to Google Drive
-export const uploadFile = async (
-  accessToken: string,
-  file: File,
-  folderId?: string,
-  conflictResolution: 'overwrite' | 'rename' = 'rename'
-) => {
-  try {
-    const drive = initDriveService(accessToken);
-
-    let fileMetadata: any = {
-      name: file.name,
-    };
-
-    if (folderId) {
-      fileMetadata.parents = [folderId];
-    }
-
-    // Check for existing file if conflict resolution is 'overwrite'
-    if (conflictResolution === 'overwrite') {
-      const existingFiles = await searchFiles(accessToken, file.name, true);
-      if (existingFiles.length > 0) {
-        // Delete existing file
-        await drive.files.delete({
-          fileId: existingFiles[0].id!,
-        });
-      }
-    }
-
-    const media = {
-      mimeType: file.type,
-      body: file as any, // Convert File to readable stream
-    };
-
-    const response = await drive.files.create({
-      requestBody: fileMetadata,
-      media: media,
-      fields: 'id, name, mimeType, size, webViewLink, webContentLink',
-    });
-
-    return response.data;
-  } catch (error) {
-    console.error('Error uploading file:', error);
-    throw error;
-  }
-};
-
 // Get folders in Drive
-export const listFolders = async (accessToken: string) => {
+export const listFolders = async (accessToken: string): Promise<GoogleFolder[]> => {
   try {
-    const drive = initDriveService(accessToken);
-
-    const response = await drive.files.list({
-      q: "mimeType = 'application/vnd.google-apps.folder' and trashed=false",
-      fields: 'files(id, name, createdTime)',
-      pageSize: 50,
+    const response = await fetch('/api/drive/folders', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        accessToken,
+      }),
     });
 
-    return response.data.files || [];
+    if (!response.ok) {
+      throw new Error('Failed to list folders');
+    }
+
+    return await response.json();
   } catch (error) {
     console.error('Error listing folders:', error);
     throw error;
   }
+};
+
+// Convenience functions that use the auth service automatically
+export const listDriveFilesWithAuth = async (folderId?: string): Promise<DriveFile[]> => {
+  const accessToken = await googleAuth.getValidAccessToken();
+  if (!accessToken) {
+    throw new Error('Not authenticated with Google Drive');
+  }
+  return listDriveFiles(accessToken, folderId);
+};
+
+export const getFileInfoWithAuth = async (fileId: string): Promise<DriveFile> => {
+  const accessToken = await googleAuth.getValidAccessToken();
+  if (!accessToken) {
+    throw new Error('Not authenticated with Google Drive');
+  }
+  return getFileInfo(accessToken, fileId);
+};
+
+export const searchFilesWithAuth = async (query: string, exactMatch = false): Promise<DriveFile[]> => {
+  const accessToken = await googleAuth.getValidAccessToken();
+  if (!accessToken) {
+    throw new Error('Not authenticated with Google Drive');
+  }
+  return searchFiles(accessToken, query, exactMatch);
+};
+
+export const listFoldersWithAuth = async (): Promise<GoogleFolder[]> => {
+  const accessToken = await googleAuth.getValidAccessToken();
+  if (!accessToken) {
+    throw new Error('Not authenticated with Google Drive');
+  }
+  return listFolders(accessToken);
 };
