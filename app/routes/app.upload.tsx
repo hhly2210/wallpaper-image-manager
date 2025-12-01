@@ -19,6 +19,7 @@ export default function UploadPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDryRunning, setIsDryRunning] = useState(false);
   const [dryResults, setDryResults] = useState<any>(null);
+  const [uploadResults, setUploadResults] = useState<any>(null);
   const [selectedFolder, setSelectedFolder] = useState<string>('');
     const [skuData, setSkuData] = useState<any[]>([]);
   const [flattenedSKUs, setFlattenedSKUs] = useState<any[]>([]); // For UI display
@@ -90,28 +91,71 @@ export default function UploadPage() {
   const onSubmit = async (data: UploadFormData) => {
     setIsSubmitting(true);
     try {
-      console.log("Form submitted with data:", data);
+      console.log("🚀 Starting real upload process with data:", data);
 
-      // TODO: Add actual upload logic here
-      // 1. Upload images to Google Drive/Shopify
-      // 2. Get upload results with Shopify URLs and SKUs
-      // 3. For each successful upload with SKU match:
-      //    - Detect image type from filename (room/hover)
-      //    - Call updateShopifyMetafield(productId, color, shopifyUrl, imageType)
+      const selectedFolderId = getSelectedFolder();
+      const accessToken = await getGoogleDriveToken();
 
-      // For now, simulate the process
-      console.log("🚧 Simulating upload process...");
+      if (!selectedFolderId) {
+        alert('Please select a Google Drive folder first');
+        setIsSubmitting(false);
+        return;
+      }
 
-      // Real metafield updates are now tested in dry upload simulation
-      console.log("🔗 Metafield updates tested in dry upload simulation");
+      if (!accessToken) {
+        alert('Not connected to Google Drive. Please connect first.');
+        setIsSubmitting(false);
+        return;
+      }
+
+      console.log("📤 Uploading to Shopify...", {
+        folderId: selectedFolderId,
+        skuTarget: data.skuTarget,
+        conflictResolution: data.conflictResolution
+      });
+
+      const response = await fetch('/api/upload/shopify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          type: 'folder',
+          folderId: selectedFolderId,
+          accessToken,
+          skuTarget: data.skuTarget,
+          conflictResolution: data.conflictResolution
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `Upload failed with status ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log("✅ Upload completed successfully:", result);
+
+      // Save upload results
+      setUploadResults(result);
 
       // Show success message
-      setTimeout(() => {
-        setIsSubmitting(false);
-        reset();
-      }, 2000);
+      const message = `🎉 Upload Complete!\n\n` +
+        `📁 Total files: ${result.totalFiles}\n` +
+        `✅ Successfully uploaded: ${result.uploadedFiles}\n` +
+        `🔗 Products matched: ${result.matchedFiles || 0}\n` +
+        `🖼️ Metafields updated: ${result.metafieldUpdates || 0}\n` +
+        `${result.failedFiles > 0 ? `❌ Failed: ${result.failedFiles}\n` : ''}` +
+        `\nYour images have been uploaded to Shopify and linked to the corresponding products!`;
+
+      alert(message);
+
+      setIsSubmitting(false);
+      reset();
+
     } catch (error) {
-      console.error("Upload failed:", error);
+      console.error("❌ Upload failed:", error);
+      alert(`Upload Failed\n\n${error instanceof Error ? error.message : 'Unknown error'}\n\nPlease check your connection and try again.`);
       setIsSubmitting(false);
     }
   };
@@ -1189,7 +1233,11 @@ export default function UploadPage() {
               </s-button>
               <s-button
                 variant="plain"
-                onClick={() => reset()}
+                onClick={() => {
+                  reset();
+                  setUploadResults(null);
+                  setDryResults(null);
+                }}
                 disabled={isSubmitting}
               >
                 Reset
@@ -1311,6 +1359,122 @@ export default function UploadPage() {
                         {result.processingDetails?.skuMatch?.matchedSKU && (
                           <span><br />SKU Match: {result.processingDetails.skuMatch.matchedSKU.sku} ({result.processingDetails.skuMatch.matchedSKU.productTitle})</span>
                         )}
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
+            </s-stack>
+          </s-box>
+        </s-section>
+      )}
+
+      {/* Upload Results Section */}
+      {uploadResults && (
+        <s-section heading="Upload Results">
+          <s-box padding="base" borderWidth="base" borderRadius="base" background="success-subdued">
+            <s-stack direction="block" gap="base">
+              <s-heading level="4">🎉 Upload Complete!</s-heading>
+
+              <s-stack direction="inline" gap="large" alignment="center">
+                <s-box padding="base" background="surface" borderRadius="base">
+                  <s-paragraph>
+                    <strong>📁 Total Files:</strong> {uploadResults.totalFiles}
+                  </s-paragraph>
+                </s-box>
+                <s-box padding="base" background="success-subdued" borderRadius="base">
+                  <s-paragraph>
+                    <strong>✅ Uploaded:</strong> {uploadResults.uploadedFiles}
+                  </s-paragraph>
+                </s-box>
+                {uploadResults.matchedFiles > 0 && (
+                  <s-box padding="base" background="info-subdued" borderRadius="base">
+                    <s-paragraph>
+                      <strong>🔗 Products Matched:</strong> {uploadResults.matchedFiles}
+                    </s-paragraph>
+                  </s-box>
+                )}
+                {uploadResults.metafieldUpdates > 0 && (
+                  <s-box padding="base" background="info-subdued" borderRadius="base">
+                    <s-paragraph>
+                      <strong>🖼️ Metafields Updated:</strong> {uploadResults.metafieldUpdates}
+                    </s-paragraph>
+                  </s-box>
+                )}
+                {uploadResults.failedFiles > 0 && (
+                  <s-box padding="base" background="critical-subdued" borderRadius="base">
+                    <s-paragraph>
+                      <strong>❌ Failed:</strong> {uploadResults.failedFiles}
+                    </s-paragraph>
+                  </s-box>
+                )}
+              </s-stack>
+
+              <s-box padding="base" background="surface" borderRadius="base">
+                <s-paragraph>
+                  Your images have been successfully uploaded to Shopify and linked to the corresponding products!<br />
+                  <strong>Request ID:</strong> {uploadResults.requestId}<br />
+                  <strong>Completed at:</strong> {new Date(uploadResults.timestamp).toLocaleString()}
+                </s-paragraph>
+              </s-box>
+
+              <s-stack direction="inline" gap="base">
+                <s-button
+                  variant="plain"
+                  onClick={() => {
+                    console.log('Upload results:', uploadResults);
+                  }}
+                >
+                  📊 View Details in Console
+                </s-button>
+                <s-button
+                  variant="secondary"
+                  onClick={() => setUploadResults(null)}
+                >
+                  Clear Results
+                </s-button>
+              </s-stack>
+
+              {uploadResults.results && uploadResults.results.length > 0 && (
+                <details style={{ marginTop: '16px' }}>
+                  <summary style={{ cursor: 'pointer', fontWeight: 'bold', marginBottom: '8px' }}>
+                    📋 File Upload Details ({uploadResults.results.length} files)
+                  </summary>
+                  <div style={{
+                    maxHeight: '300px',
+                    overflow: 'auto',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '4px',
+                    padding: '8px',
+                    backgroundColor: '#f9fafb',
+                    fontSize: '12px',
+                    fontFamily: 'monospace'
+                  }}>
+                    {uploadResults.results.map((result: any, index: number) => (
+                      <div key={index} style={{
+                        marginBottom: '8px',
+                        padding: '4px',
+                        borderBottom: '1px solid #e5e7eb',
+                        color: result.status === 'success' ? '#059669' : '#dc2626'
+                      }}>
+                        <strong>{result.fileName}</strong><br />
+                        Status: {result.status.toUpperCase()}<br />
+                        {result.shopifyUrl && (
+                          <span>
+                            Shopify URL: <a href={result.shopifyUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb' }}>
+                              {result.shopifyUrl.substring(0, 50)}...
+                            </a><br />
+                          </span>
+                        )}
+                        {result.skuMatch && (
+                          <span>
+                            Product: <strong>{result.skuMatch.productTitle}</strong><br />
+                            SKU: {result.skuMatch.sku}<br />
+                            Color: {result.skuMatch.color}<br />
+                            Type: {result.imageType}<br />
+                          </span>
+                        )}
+                        Message: {result.message}
                       </div>
                     ))}
                   </div>
