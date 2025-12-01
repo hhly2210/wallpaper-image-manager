@@ -640,26 +640,48 @@ export default function UploadPage() {
               matchedCount++;
             }
             // Enhanced success log with detailed product matching
-          if (simulatedResult.skuMatch) {
-            logProgress(`  ✅ Success ${fileNumber}`, `${file.name} → Product: "${simulatedResult.skuMatch.productTitle}"`);
-            logProgress(`     📦 SKU: ${simulatedResult.skuMatch.sku}`, `• Variant: ${simulatedResult.skuMatch.color || 'Default'} • Price: $${simulatedResult.skuMatch.price} • Stock: ${simulatedResult.skuMatch.inventoryQuantity}`);
-          } else {
-            logProgress(`  ✅ Success ${fileNumber}`, `${file.name} → No SKU match (general upload)`);
-          }
-
-          // Log metafield update simulation
-          if (simulatedResult.metafieldUpdate) {
-            const mf = simulatedResult.metafieldUpdate;
-            if (mf.wouldUpdate) {
-              metafieldUpdates++;
-              logProgress(`  🔗 Metafield Update ${fileNumber}`, `${file.name} → ${mf.imageType} image for "${mf.color}"`);
-              logProgress(`     📝 Target`, `Product ID: ${mf.productId}`);
+            if (simulatedResult.skuMatch) {
+              logProgress(`  ✅ Success ${fileNumber}`, `${file.name} → Product: "${simulatedResult.skuMatch.productTitle}"`);
+              logProgress(`     📦 SKU: ${simulatedResult.skuMatch.sku}`, `• Variant: ${simulatedResult.skuMatch.color || 'Default'} • Price: $${simulatedResult.skuMatch.price} • Stock: ${simulatedResult.skuMatch.inventoryQuantity}`);
             } else {
-              logProgress(`  ⏸️ Metafield Skipped ${fileNumber}`, `${file.name} → Unknown image type`);
+              logProgress(`  ✅ Success ${fileNumber}`, `${file.name} → No SKU match (general upload)`);
             }
-          }
+
+            // Log metafield update simulation
+            if (simulatedResult.metafieldUpdate) {
+              const mf = simulatedResult.metafieldUpdate;
+              if (mf.wouldUpdate) {
+                metafieldUpdates++;
+                logProgress(`  🔗 Metafield Update ${fileNumber}`, `${file.name} → ${mf.imageType} image for "${mf.color}"`);
+                logProgress(`     📝 Target`, `Product ID: ${mf.productId}`);
+              } else {
+                logProgress(`  ⏸️ Metafield Skipped ${fileNumber}`, `${file.name} → Unknown image type`);
+              }
+            }
           } else if (simulatedResult.status === 'warning') {
             successCount++; // Warnings still count as success
+            // FIX: Count matched SKUs even for warning status
+            if (simulatedResult.skuMatch) {
+              matchedCount++;
+            }
+            // Enhanced warning log with detailed product matching
+            if (simulatedResult.skuMatch) {
+              logProgress(`  ⚠️ Warning ${fileNumber}`, `${file.name} → Product: "${simulatedResult.skuMatch.productTitle}"`);
+              logProgress(`     📦 SKU: ${simulatedResult.skuMatch.sku}`, `• Variant: ${simulatedResult.skuMatch.color || 'Default'} • Price: $${simulatedResult.skuMatch.price} • Stock: ${simulatedResult.skuMatch.inventoryQuantity}`);
+              logProgress(`     ⚠️ Warning Reason`, simulatedResult.message);
+            }
+
+            // Log metafield update simulation for warnings too
+            if (simulatedResult.metafieldUpdate) {
+              const mf = simulatedResult.metafieldUpdate;
+              if (mf.wouldUpdate) {
+                metafieldUpdates++;
+                logProgress(`  🔗 Metafield Update ${fileNumber}`, `${file.name} → ${mf.imageType} image for "${mf.color}"`);
+                logProgress(`     📝 Target`, `Product ID: ${mf.productId}`);
+              } else {
+                logProgress(`  ⏸️ Metafield Skipped ${fileNumber}`, `${file.name} → Unknown image type`);
+              }
+            }
           } else if (simulatedResult.status === 'skipped') {
             skippedCount++;
             logProgress(`  ⏭️ Skipped ${fileNumber}`, `${file.name} → ${simulatedResult.message}`);
@@ -833,36 +855,107 @@ export default function UploadPage() {
       const fileNameClean = fileNameWithoutExt.replace(/[-_\s]/g, ''); // Remove separators
 
       if (config.skuTarget === 'exact-sku') {
-        // Exact match with SKU
+        // Exact match with SKU - check if filename starts with SKU (handles WP-BANK-SKY-2424-ROOM format)
         matchedSKU = availableSKUs.find(sku => {
           const skuClean = sku.sku.toLowerCase().replace(/[-_\s]/g, '');
-          return skuClean === fileNameClean ||
-                 sku.sku.toLowerCase() === fileNameWithoutExt ||
-                 fileNameWithoutExt.includes(sku.sku.toLowerCase());
+          const fileNameClean = fileNameWithoutExt.replace(/[-_\s]/g, '');
+
+          // Check if filename starts with SKU (prefix match)
+          // This handles cases like: WP-BANK-SKY-2424-ROOM matches WP-BANK-SKY-2424
+          const isPrefixMatch = fileNameClean.startsWith(skuClean) ||
+                                fileNameWithoutExt.toLowerCase().startsWith(sku.sku.toLowerCase());
+
+          // Keep existing exact matches as fallback
+          const isExactMatch = skuClean === fileNameClean ||
+                              sku.sku.toLowerCase() === fileNameWithoutExt ||
+                              fileNameWithoutExt.includes(sku.sku.toLowerCase());
+
+          return isPrefixMatch || isExactMatch;
         });
+
         skuMatchType = matchedSKU ? 'exact' : 'none';
 
+        // Add detailed logging for exact matches
+        if (matchedSKU) {
+          const skuClean = matchedSKU.sku.toLowerCase().replace(/[-_\s]/g, '');
+          const fileNameClean = fileNameWithoutExt.replace(/[-_\s]/g, '');
+
+          const isPrefixMatch = fileNameClean.startsWith(skuClean) ||
+                                fileNameWithoutExt.toLowerCase().startsWith(matchedSKU.sku.toLowerCase());
+          const isExactMatch = skuClean === fileNameClean ||
+                              matchedSKU.sku.toLowerCase() === fileNameWithoutExt;
+
+          const matchType = isPrefixMatch ? 'PREFIX' :
+                          isExactMatch ? 'EXACT' : 'CONTAINS';
+
+          logProgress(`  ✅ Exact Match`, `${fileName} → SKU: ${matchedSKU.sku} (${matchType}) → Product: ${matchedSKU.productTitle}`);
+          if (matchedSKU.color) {
+            logProgress(`     🎨 Variant Details`, `Color: ${matchedSKU.color} • Price: $${matchedSKU.price} • Stock: ${matchedSKU.inventoryQuantity}`);
+          }
+        } else {
+          // Log when no SKU match is found for debugging
+          logProgress(`  ❌ No Match`, `${fileName} → No matching SKU found`);
+          logProgress(`     📝 Debug Info`, `Clean filename: ${fileNameWithoutExt.replace(/[-_\s]/g, '')}`);
+          if (availableSKUs.length > 0) {
+            logProgress(`     📦 Available SKUs`, `${availableSKUs.length} SKUs available for matching`);
+            // Show first few SKUs for debugging
+            const sampleSKUs = availableSKUs.slice(0, 3).map(s => s.sku).join(', ');
+            logProgress(`     🔍 Sample SKUs`, sampleSKUs + (availableSKUs.length > 3 ? '...' : ''));
+          }
+        }
+
       } else if (config.skuTarget === 'contains-sku') {
-        // Enhanced contains match with SKU and color
+        // Enhanced contains match with SKU and color - improved logic for WP-BANK-SKY-2424-XXX format
         const potentialMatches = availableSKUs.filter(sku => {
           const skuClean = sku.sku.toLowerCase().replace(/[-_\s]/g, '');
-          return fileNameWithoutExt.includes(sku.sku.toLowerCase()) ||
-                 sku.sku.toLowerCase().includes(fileNameWithoutExt) ||
-                 fileNameClean.includes(skuClean) ||
-                 skuClean.includes(fileNameClean);
+
+          // Priority 1: Prefix match - filename starts with SKU (WP-BANK-SKY-2424-ROOM starts with WP-BANK-SKY-2424)
+          const isPrefixMatch = fileNameClean.startsWith(skuClean) ||
+                                fileNameWithoutExt.toLowerCase().startsWith(sku.sku.toLowerCase());
+
+          // Priority 2: Contains match - filename contains SKU somewhere
+          const isContainsMatch = fileNameWithoutExt.includes(sku.sku.toLowerCase()) ||
+                                 fileNameClean.includes(skuClean) ||
+                                 sku.sku.toLowerCase().includes(fileNameWithoutExt) ||
+                                 skuClean.includes(fileNameClean);
+
+          return isPrefixMatch || isContainsMatch;
         });
 
         // Smart matching strategy for multiple potential matches
         if (potentialMatches.length > 1) {
-          // Strategy 1: Most specific match (longest matching string)
+          // Strategy 1: Most specific match (prioritize prefix matches)
           const specificMatches = potentialMatches.map(sku => {
             const skuClean = sku.sku.toLowerCase().replace(/[-_\s]/g, '');
-            const overlap = fileNameClean.length > skuClean.length ?
-              fileNameClean.includes(skuClean) : skuClean.includes(fileNameClean);
+            const fileNameClean = fileNameWithoutExt.replace(/[-_\s]/g, '');
+
+            // Check if it's a prefix match (highest priority)
+            const isPrefixMatch = fileNameClean.startsWith(skuClean) ||
+                                fileNameWithoutExt.toLowerCase().startsWith(sku.sku.toLowerCase());
+
+            // Check if it's an exact match (medium priority)
+            const isExactMatch = fileNameClean === skuClean;
+
+            // Check if it's a contains match (lowest priority)
+            const isContainsMatch = fileNameClean.includes(skuClean) ||
+                                  fileNameWithoutExt.includes(sku.sku.toLowerCase());
+
+            // Calculate score with priority weighting
+            let score = 0;
+            if (isPrefixMatch) {
+              score = (fileNameClean.length + skuClean.length) * 3; // Highest weight
+            } else if (isExactMatch) {
+              score = (fileNameClean.length + skuClean.length) * 2; // Medium weight
+            } else if (isContainsMatch) {
+              score = fileNameClean.length + skuClean.length; // Lowest weight
+            }
+
             return {
               sku,
-              score: overlap ? (fileNameClean.length + skuClean.length) : 0,
-              exactMatch: fileNameClean === skuClean
+              score,
+              isPrefixMatch,
+              isExactMatch,
+              isContainsMatch
             };
           });
 
@@ -894,7 +987,12 @@ export default function UploadPage() {
 
           // Log matching details
           if (bestMatch) {
-            logProgress(`  🎯 Smart Match`, `Selected SKU: ${bestMatch.sku} → Product: ${bestMatch.productTitle}`);
+            const matchInfo = specificMatches.find(m => m.sku === bestMatch);
+            const matchType = matchInfo?.isPrefixMatch ? 'PREFIX' :
+                            matchInfo?.isExactMatch ? 'EXACT' :
+                            matchInfo?.isContainsMatch ? 'CONTAINS' : 'UNKNOWN';
+
+            logProgress(`  🎯 Smart Match`, `Selected SKU: ${bestMatch.sku} → Product: ${bestMatch.productTitle} (${matchType})`);
             if (bestMatch.color) {
               logProgress(`     🎨 Color Variant`, `${bestMatch.color} • Price: $${bestMatch.price} • Stock: ${bestMatch.inventoryQuantity}`);
             }
@@ -910,6 +1008,18 @@ export default function UploadPage() {
         }
 
         skuMatchType = matchedSKU ? 'contains' : 'none';
+
+        // Log when no SKU match is found for contains mode debugging
+        if (!matchedSKU) {
+          logProgress(`  ❌ No Contains Match`, `${fileName} → No matching SKU found in contains mode`);
+          logProgress(`     📝 Debug Info`, `Clean filename: ${fileNameWithoutExt.replace(/[-_\s]/g, '')}`);
+          if (availableSKUs.length > 0) {
+            logProgress(`     📦 Available SKUs`, `${availableSKUs.length} SKUs available for matching`);
+            // Show first few SKUs for debugging
+            const sampleSKUs = availableSKUs.slice(0, 3).map(s => s.sku).join(', ');
+            logProgress(`     🔍 Sample SKUs`, sampleSKUs + (availableSKUs.length > 3 ? '...' : ''));
+          }
+        }
       }
 
       // Build match details
