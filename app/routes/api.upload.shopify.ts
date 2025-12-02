@@ -396,12 +396,16 @@ async function handleFolderUpload(
                   mimeType
                 }
                 ... on MediaImage {
+                  status
                   image {
+                    url
                     width
                     height
                   }
-                  originalSource {
-                    url
+                  preview {
+                    image {
+                      url
+                    }
                   }
                 }
               }
@@ -438,18 +442,87 @@ async function handleFolderUpload(
 
         const shopifyFileId = createdFile.id;
 
-        // Get URL from either GenericFile or MediaImage
-        const shopifyUrl = createdFile.url ||
-                          createdFile.originalSource?.url ||
-                          `gid://shopify/MediaImage/${shopifyFileId.split('/').pop()}`;
+        // Try to get CDN URL from various sources, fallback to GID if not available
+        let shopifyUrl: string;
+
+        if (createdFile.image?.url) {
+          // Best case: MediaImage with processed CDN URL
+          shopifyUrl = createdFile.image.url;
+        } else if (createdFile.preview?.image?.url) {
+          // Fallback: Preview image URL
+          shopifyUrl = createdFile.preview.image.url;
+        } else if (createdFile.url) {
+          // Fallback: GenericFile direct URL
+          shopifyUrl = createdFile.url;
+        } else {
+          // Last resort: Use the GID (as originally implemented)
+          shopifyUrl = shopifyFileId;
+        }
 
         console.log(`[${requestId}] File created with details:`, {
           shopifyFileId,
           shopifyUrl,
           fileStatus: createdFile.fileStatus,
+          mediaStatus: (createdFile as any).status,
+          hasImageUrl: !!createdFile.image?.url,
+          hasPreviewUrl: !!createdFile.preview?.image?.url,
           hasDirectUrl: !!createdFile.url,
-          hasOriginalSourceUrl: !!createdFile.originalSource?.url
+          imageWidth: createdFile.image?.width,
+          imageHeight: createdFile.image?.height
         });
+
+        // If we only have GID, try to wait and query again for CDN URL
+        if (shopifyUrl === shopifyFileId && createdFile.fileStatus === 'PROCESSING') {
+          console.log(`[${requestId}] File is processing, attempting to wait for CDN URL...`);
+
+          try {
+            // Wait a bit and query again
+            await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
+
+            const retryQuery = `
+              query node($id: ID!) {
+                node(id: $id) {
+                  ... on MediaImage {
+                    status
+                    image {
+                      url
+                      width
+                      height
+                    }
+                    preview {
+                      image {
+                        url
+                      }
+                    }
+                  }
+                }
+              }
+            `;
+
+            const retryResponse = await admin.graphql(retryQuery, {
+              variables: { id: shopifyFileId }
+            });
+
+            const retryData = await retryResponse.json();
+            const retryNode = retryData?.data?.node;
+
+            if (retryNode?.image?.url) {
+              shopifyUrl = retryNode.image.url;
+              console.log(`[${requestId}] Successfully obtained CDN URL after retry:`, {
+                shopifyUrl,
+                status: retryNode.status
+              });
+            } else if (retryNode?.preview?.image?.url) {
+              shopifyUrl = retryNode.preview.image.url;
+              console.log(`[${requestId}] Using preview URL after retry:`, {
+                shopifyUrl,
+                status: retryNode.status
+              });
+            }
+          } catch (retryError) {
+            console.warn(`[${requestId}] Failed to retry for CDN URL:`, retryError);
+          }
+        }
 
         console.log(`[${requestId}] Successfully created Shopify file asset:`, {
           shopifyFileId,
@@ -744,12 +817,16 @@ async function handleFileIdsUpload(
                   mimeType
                 }
                 ... on MediaImage {
+                  status
                   image {
+                    url
                     width
                     height
                   }
-                  originalSource {
-                    url
+                  preview {
+                    image {
+                      url
+                    }
                   }
                 }
               }
@@ -784,10 +861,64 @@ async function handleFileIdsUpload(
           throw new Error('Failed to create Shopify file asset');
         }
 
-        // Get URL from either GenericFile or MediaImage
-        const shopifyUrl = createdFile.url ||
-                          createdFile.originalSource?.url ||
-                          `gid://shopify/MediaImage/${createdFile.id.split('/').pop()}`;
+        // Try to get CDN URL from various sources, fallback to GID if not available
+        let shopifyUrl: string;
+
+        if (createdFile.image?.url) {
+          // Best case: MediaImage with processed CDN URL
+          shopifyUrl = createdFile.image.url;
+        } else if (createdFile.preview?.image?.url) {
+          // Fallback: Preview image URL
+          shopifyUrl = createdFile.preview.image.url;
+        } else if (createdFile.url) {
+          // Fallback: GenericFile direct URL
+          shopifyUrl = createdFile.url;
+        } else {
+          // Last resort: Use the GID (as originally implemented)
+          shopifyUrl = createdFile.id;
+        }
+
+        // If we only have GID and file is processing, try to wait for CDN URL
+        if (shopifyUrl === createdFile.id && createdFile.fileStatus === 'PROCESSING') {
+          try {
+            await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
+
+            const retryQuery = `
+              query node($id: ID!) {
+                node(id: $id) {
+                  ... on MediaImage {
+                    status
+                    image {
+                      url
+                      width
+                      height
+                    }
+                    preview {
+                      image {
+                        url
+                      }
+                    }
+                  }
+                }
+              }
+            `;
+
+            const retryResponse = await admin.graphql(retryQuery, {
+              variables: { id: createdFile.id }
+            });
+
+            const retryData = await retryResponse.json();
+            const retryNode = retryData?.data?.node;
+
+            if (retryNode?.image?.url) {
+              shopifyUrl = retryNode.image.url;
+            } else if (retryNode?.preview?.image?.url) {
+              shopifyUrl = retryNode.preview.image.url;
+            }
+          } catch (retryError) {
+            // Continue with GID if retry fails
+          }
+        }
 
         uploadResults.push({
           googleFileId: file.id,
@@ -918,6 +1049,18 @@ function matchFileWithSKU(fileName: string, availableSKUs: any[], skuTarget: str
   return null;
 }
 
+// Helper function to normalize color name from SKU to display format
+function normalizeColorName(colorFromSku: string): string {
+  if (!colorFromSku) return '';
+
+  // Convert underscores to spaces and capitalize each word
+  return colorFromSku
+    .toLowerCase()
+    .split('_')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
 // Helper function to detect image type from filename
 function detectImageType(fileName: string): 'room' | 'hover' | null {
   // Add null check
@@ -938,6 +1081,81 @@ function detectImageType(fileName: string): 'room' | 'hover' | null {
   return null;
 }
 
+// Helper function to get CDN URL from GID using reference query
+async function getCdnUrlFromGid(admin: any, gid: string, requestId: string): Promise<string> {
+  try {
+    console.log(`[${requestId}] Querying CDN URL for GID: ${gid}`);
+
+    // Wait a moment for file to be processed
+    console.log(`[${requestId}] Waiting 2 seconds for file processing...`);
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    const referenceQuery = `
+      query node($id: ID!) {
+        node(id: $id) {
+          ... on MediaImage {
+            id
+            status
+            image {
+              originalSrc
+              url
+              width
+              height
+            }
+            preview {
+              image {
+                originalSrc
+                url
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    const response = await admin.graphql(referenceQuery, {
+      variables: { id: gid }
+    });
+
+    const data = await response.json();
+    const node = data?.data?.node;
+
+    console.log(`[${requestId}] Query response for GID ${gid}:`, {
+      hasNode: !!node,
+      status: node?.status,
+      hasImage: !!node?.image,
+      hasOriginalSrc: !!node?.image?.originalSrc,
+      hasUrl: !!node?.image?.url,
+      hasPreview: !!node?.preview,
+      hasPreviewImage: !!node?.preview?.image,
+      originalSrc: node?.image?.originalSrc,
+      url: node?.image?.url,
+      previewOriginalSrc: node?.preview?.image?.originalSrc,
+      previewUrl: node?.preview?.image?.url
+    });
+
+    if (node?.image?.originalSrc) {
+      console.log(`[${requestId}] Found CDN URL (originalSrc): ${node.image.originalSrc}`);
+      return node.image.originalSrc;
+    } else if (node?.image?.url && node?.image?.url.startsWith('https://')) {
+      console.log(`[${requestId}] Found CDN URL (url): ${node.image.url}`);
+      return node.image.url;
+    } else if (node?.preview?.image?.originalSrc) {
+      console.log(`[${requestId}] Found CDN URL (preview originalSrc): ${node.preview.image.originalSrc}`);
+      return node.preview.image.originalSrc;
+    } else if (node?.preview?.image?.url && node?.preview?.image?.url.startsWith('https://')) {
+      console.log(`[${requestId}] Found CDN URL (preview url): ${node.preview.image.url}`);
+      return node.preview.image.url;
+    } else {
+      console.warn(`[${requestId}] No CDN URL found for GID: ${gid}. Full response:`, data);
+      return gid; // Fallback to GID
+    }
+  } catch (error) {
+    console.warn(`[${requestId}] Failed to get CDN URL for GID ${gid}:`, error);
+    return gid; // Fallback to GID
+  }
+}
+
 // Helper function to update product metafield
 async function updateProductMetafield(
   admin: any,
@@ -954,78 +1172,111 @@ async function updateProductMetafield(
       return false;
     }
 
-    console.log(`[${requestId}] Updating metafield: productId=${productId}, color=${color}, type=${imageType}`);
+    // Normalize color name (e.g., "DUSTY_ROSE" -> "Dusty Rose")
+    const normalizedColor = normalizeColorName(color);
 
-    // First, get current metafield value
-    const getMetafieldQuery = `
-      mutation getProductMetafield($productId: ID!) {
-        product(id: $productId) {
-          metafield(namespace: "wallpaper", key: "color_images") {
-            id
-            value
-            type
+    console.log(`[${requestId}] Updating metafield: productId=${productId}, color=${color} -> ${normalizedColor}, type=${imageType}`);
+
+    // If imageUrl is a GID, get the actual CDN URL first
+    let finalImageUrl = imageUrl;
+    if (imageUrl.startsWith('gid://')) {
+      console.log(`[${requestId}] Converting GID to CDN URL: ${imageUrl}`);
+      finalImageUrl = await getCdnUrlFromGid(admin, imageUrl, requestId);
+    }
+
+    // Try different metafield namespace/key combinations
+    const metafieldCombinations = [
+      { namespace: "wallpaper", key: "color_images" },
+      { namespace: "custom", key: "wallpaper_color_images" },
+      { namespace: "my_fields", key: "color_images" }
+    ];
+
+    let metafieldData = null;
+    let usedNamespace = metafieldCombinations[0];
+
+    // Try to find existing metafield
+    for (const combo of metafieldCombinations) {
+      const getMetafieldQuery = `
+        query getProductMetafield($productId: ID!, $namespace: String!, $key: String!) {
+          product(id: $productId) {
+            metafield(namespace: $namespace, key: $key) {
+              id
+              value
+              type
+              namespace
+              key
+            }
           }
         }
+      `;
+
+      const response = await admin.graphql(getMetafieldQuery, {
+        variables: {
+          productId,
+          namespace: combo.namespace,
+          key: combo.key
+        }
+      });
+
+      const data = await response.json();
+      if (data?.data?.product?.metafield) {
+        metafieldData = data.data.product.metafield;
+        usedNamespace = combo;
+        console.log(`[${requestId}] Found existing metafield with namespace: ${combo.namespace}, key: ${combo.key}`);
+        break;
       }
-    `;
-
-    const metafieldResponse = await admin.graphql(getMetafieldQuery, {
-      variables: { productId }
-    });
-
-    const metafieldData = await metafieldResponse.json();
-    const existingMetafield = metafieldData?.data?.product?.metafield;
+    }
 
     let currentMetafieldValue: any[] = [];
-    if (existingMetafield && existingMetafield.value) {
+    if (metafieldData && metafieldData.value) {
       try {
-        currentMetafieldValue = JSON.parse(existingMetafield.value);
+        currentMetafieldValue = JSON.parse(metafieldData.value);
+        console.log(`[${requestId}] Loaded existing metafield with ${currentMetafieldValue.length} color entries`);
       } catch (error) {
         console.warn(`[${requestId}] Failed to parse existing metafield, starting fresh:`, error);
         currentMetafieldValue = [];
       }
     }
 
-    // Find or create color entry
+    // Find or create color entry (case-insensitive comparison)
     let colorEntry = currentMetafieldValue.find((entry: any) =>
-      entry.color.toLowerCase() === color.toLowerCase()
+      entry.color && entry.color.toLowerCase() === normalizedColor.toLowerCase()
     );
 
     if (!colorEntry) {
       colorEntry = {
-        color: color,
+        color: normalizedColor,
         images: []
       };
       currentMetafieldValue.push(colorEntry);
-      console.log(`[${requestId}] Created new color entry for: ${color}`);
+      console.log(`[${requestId}] Created new color entry for: ${normalizedColor}`);
     }
 
-    // Update or add image
+    // Update or add image with CDN URL
     const imageIndex = colorEntry.images.findIndex((img: any) => img.type === imageType);
     const newImage = {
       type: imageType,
-      url: imageUrl
+      url: finalImageUrl // Store the actual CDN URL
     };
 
     if (imageIndex >= 0) {
       colorEntry.images[imageIndex] = newImage;
-      console.log(`[${requestId}] Updated existing ${imageType} image for color: ${color}`);
+      console.log(`[${requestId}] Updated existing ${imageType} image for color: ${normalizedColor}`);
     } else {
       colorEntry.images.push(newImage);
-      console.log(`[${requestId}] Added new ${imageType} image for color: ${color}`);
+      console.log(`[${requestId}] Added new ${imageType} image for color: ${normalizedColor}`);
     }
 
-    // Update metafield
+    // Update metafield using metafieldsSet mutation with json type
     const updateMetafieldQuery = `
-      mutation productUpdateMetafield($input: ProductInput!) {
-        productUpdate(input: $input) {
-          product {
+      mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+        metafieldsSet(metafields: $metafields) {
+          metafields {
             id
-            metafield(namespace: "wallpaper", key: "color_images") {
-              id
-              value
-              type
-            }
+            namespace
+            key
+            value
+            type
           }
           userErrors {
             field
@@ -1035,35 +1286,40 @@ async function updateProductMetafield(
       }
     `;
 
+    // Store with json type since we're storing actual CDN URLs
     const updateResponse = await admin.graphql(updateMetafieldQuery, {
       variables: {
-        input: {
-          id: productId,
-          metafields: [
-            {
-              namespace: "wallpaper",
-              key: "color_images",
-              type: "json",
-              value: JSON.stringify(currentMetafieldValue)
-            }
-          ]
-        }
+        metafields: [
+          {
+            ownerId: productId,
+            namespace: usedNamespace.namespace,
+            key: usedNamespace.key,
+            type: "json",
+            value: JSON.stringify(currentMetafieldValue)
+          }
+        ]
       }
     });
 
     const updateData = await updateResponse.json();
 
-    if (updateData?.data?.productUpdate?.userErrors?.length > 0) {
-      const errors = updateData.data.productUpdate.userErrors;
+    if (updateData?.data?.metafieldsSet?.userErrors?.length > 0) {
+      const errors = updateData.data.metafieldsSet.userErrors;
       console.error(`[${requestId}] GraphQL errors:`, errors);
       return false;
     }
 
-    console.log(`[${requestId}] SUCCESS: Metafield updated for product ${productId}, color: ${color}, type: ${imageType}`);
+    console.log(`[${requestId}] SUCCESS: Metafield updated for product ${productId}, color: ${normalizedColor}, type: ${imageType}`);
+    console.log(`[${requestId}] Original GID: ${imageUrl}`);
+    console.log(`[${requestId}] Final CDN URL: ${finalImageUrl}`);
+    console.log(`[${requestId}] Updated metafield value preview:`, JSON.stringify(currentMetafieldValue, null, 2));
     return true;
 
   } catch (error) {
-    console.error(`[${requestId}] ERROR: Metafield update failed:`, error);
+    console.error(`[${requestId}] ERROR: Metafield update failed:`, {
+      error: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined
+    });
     return false;
   }
 }
