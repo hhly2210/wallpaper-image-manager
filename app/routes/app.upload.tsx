@@ -26,6 +26,23 @@ export default function UploadPage() {
   const [isLoadingSKUs, setIsLoadingSKUs] = useState(false);
   const [skuError, setSkuError] = useState<string | null>(null);
 
+  // Progress tracking states
+  const [uploadProgress, setUploadProgress] = useState<{
+    totalFiles: number;
+    processedFiles: number;
+    currentFile: string;
+    status: 'idle' | 'connecting' | 'uploading' | 'processing' | 'completing' | 'error';
+    message: string;
+    percentage: number;
+  }>({
+    totalFiles: 0,
+    processedFiles: 0,
+    currentFile: '',
+    status: 'idle',
+    message: '',
+    percentage: 0
+  });
+
   
   const {
     register,
@@ -93,6 +110,15 @@ export default function UploadPage() {
 
   const onSubmit = async (data: UploadFormData) => {
     setIsSubmitting(true);
+    setUploadProgress({
+      totalFiles: 0,
+      processedFiles: 0,
+      currentFile: '',
+      status: 'connecting',
+      message: 'Connecting to Google Drive...',
+      percentage: 0
+    });
+
     try {
       console.log("🚀 Starting real upload process with data:", data);
 
@@ -102,12 +128,14 @@ export default function UploadPage() {
       if (!selectedFolderId) {
         alert('Please select a Google Drive folder first');
         setIsSubmitting(false);
+        setUploadProgress(prev => ({ ...prev, status: 'error', message: 'No folder selected' }));
         return;
       }
 
       if (!accessToken) {
         alert('Not connected to Google Drive. Please connect first.');
         setIsSubmitting(false);
+        setUploadProgress(prev => ({ ...prev, status: 'error', message: 'Not connected to Google Drive' }));
         return;
       }
 
@@ -115,6 +143,15 @@ export default function UploadPage() {
         folderId: selectedFolderId,
         skuTarget: data.skuTarget,
         conflictResolution: data.conflictResolution
+      });
+
+      setUploadProgress({
+        totalFiles: 0,
+        processedFiles: 0,
+        currentFile: '',
+        status: 'uploading',
+        message: 'Starting upload to Shopify...',
+        percentage: 5
       });
 
       const response = await fetch('/api/upload/shopify', {
@@ -139,6 +176,15 @@ export default function UploadPage() {
       const result = await response.json();
       console.log("✅ Upload completed successfully:", result);
 
+      setUploadProgress({
+        totalFiles: result.totalFiles || 0,
+        processedFiles: result.totalFiles || 0,
+        currentFile: 'Upload complete',
+        status: 'completing',
+        message: 'Finalizing upload...',
+        percentage: 100
+      });
+
       // Save upload results
       setUploadResults(result);
 
@@ -151,15 +197,44 @@ export default function UploadPage() {
         `${result.failedFiles > 0 ? `❌ Failed: ${result.failedFiles}\n` : ''}` +
         `\nYour images have been uploaded to Shopify and linked to the corresponding products!`;
 
-      alert(message);
+      setTimeout(() => {
+        alert(message);
+        setUploadProgress({
+          totalFiles: 0,
+          processedFiles: 0,
+          currentFile: '',
+          status: 'idle',
+          message: '',
+          percentage: 0
+        });
+      }, 1000);
 
       setIsSubmitting(false);
       reset();
 
     } catch (error) {
       console.error("❌ Upload failed:", error);
+      setUploadProgress(prev => ({
+        ...prev,
+        status: 'error',
+        message: error instanceof Error ? error.message : 'Unknown error',
+        percentage: 0
+      }));
+
       alert(`Upload Failed\n\n${error instanceof Error ? error.message : 'Unknown error'}\n\nPlease check your connection and try again.`);
       setIsSubmitting(false);
+
+      // Reset progress after a delay
+      setTimeout(() => {
+        setUploadProgress({
+          totalFiles: 0,
+          processedFiles: 0,
+          currentFile: '',
+          status: 'idle',
+          message: '',
+          percentage: 0
+        });
+      }, 3000);
     }
   };
 
@@ -1210,15 +1285,20 @@ export default function UploadPage() {
               <s-button
                 variant="primary"
                 type="submit"
-                disabled={!isValid || isSubmitting}
+                disabled={!isValid || isSubmitting || uploadProgress.status !== 'idle'}
                 loading={isSubmitting}
               >
-                {isSubmitting ? "Uploading..." : "Start Upload"}
+                {uploadProgress.status === 'connecting' && 'Connecting...'}
+                {uploadProgress.status === 'uploading' && 'Uploading...'}
+                {uploadProgress.status === 'processing' && 'Processing...'}
+                {uploadProgress.status === 'completing' && 'Completing...'}
+                {uploadProgress.status === 'error' && 'Upload Failed'}
+                {!isSubmitting && uploadProgress.status === 'idle' && "Start Upload"}
               </s-button>
               <s-button
                 variant="secondary"
                 onClick={async () => await handleDryUpload()}
-                disabled={isSubmitting || !selectedFolder || !isValid}
+                disabled={isSubmitting || uploadProgress.status !== 'idle' || !selectedFolder || !isValid}
                 loading={isDryRunning}
               >
                 🧪 Dry Upload
@@ -1229,8 +1309,16 @@ export default function UploadPage() {
                   reset();
                   setUploadResults(null);
                   setDryResults(null);
+                  setUploadProgress({
+                    totalFiles: 0,
+                    processedFiles: 0,
+                    currentFile: '',
+                    status: 'idle',
+                    message: '',
+                    percentage: 0
+                  });
                 }}
-                disabled={isSubmitting}
+                disabled={isSubmitting || uploadProgress.status !== 'idle'}
               >
                 Reset
               </s-button>
@@ -1238,6 +1326,104 @@ export default function UploadPage() {
           </div>
         </form>
       </s-section>
+
+      {/* Upload Progress Section */}
+      {uploadProgress.status !== 'idle' && (
+        <s-section heading="Upload Progress">
+          <s-box padding="base" borderWidth="base" borderRadius="base" background={
+            uploadProgress.status === 'error' ? 'critical-subdued' :
+            uploadProgress.status === 'completing' ? 'success-subdued' : 'info-subdued'
+          }>
+            <s-stack direction="block" gap="base">
+              <s-heading level="4">
+                {uploadProgress.status === 'connecting' && '🔄 Connecting...'}
+                {uploadProgress.status === 'uploading' && '📤 Uploading...'}
+                {uploadProgress.status === 'processing' && '⚙️ Processing...'}
+                {uploadProgress.status === 'completing' && '✅ Completing...'}
+                {uploadProgress.status === 'error' && '❌ Upload Failed'}
+              </s-heading>
+
+              {/* Progress Bar */}
+              <s-box padding="base" background="surface" borderRadius="base">
+                <s-paragraph>
+                  <strong>{uploadProgress.message}</strong>
+                  {uploadProgress.currentFile && (
+                    <span><br />Current file: {uploadProgress.currentFile}</span>
+                  )}
+                </s-paragraph>
+
+                {/* Custom Progress Bar */}
+                <div style={{
+                  width: '100%',
+                  height: '20px',
+                  backgroundColor: '#e5e7eb',
+                  borderRadius: '10px',
+                  overflow: 'hidden',
+                  marginTop: '8px'
+                }}>
+                  <div style={{
+                    width: `${uploadProgress.percentage}%`,
+                    height: '100%',
+                    backgroundColor: uploadProgress.status === 'error' ? '#dc2626' :
+                                     uploadProgress.status === 'completing' ? '#059669' : '#2563eb',
+                    transition: 'width 0.3s ease-in-out',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'white',
+                    fontSize: '12px',
+                    fontWeight: 'bold'
+                  }}>
+                    {uploadProgress.percentage > 10 && `${uploadProgress.percentage}%`}
+                  </div>
+                </div>
+
+                {uploadProgress.totalFiles > 0 && (
+                  <s-paragraph style={{ marginTop: '8px' }}>
+                    Progress: {uploadProgress.processedFiles} / {uploadProgress.totalFiles} files
+                  </s-paragraph>
+                )}
+              </s-box>
+
+              {/* Warning Message */}
+              {uploadProgress.status === 'uploading' || uploadProgress.status === 'processing' ? (
+                <s-box padding="base" background="warning-subdued" borderRadius="base">
+                  <s-heading level="5" tone="warning">⚠️ Important Notice</s-heading>
+                  <s-paragraph>
+                    Please <strong>DO NOT CLOSE</strong> this browser window or navigate away from this page while the upload is in progress.
+                    Doing so may interrupt the upload process and cause file corruption or incomplete uploads.
+                  </s-paragraph>
+                  <s-paragraph>
+                    The upload may take several minutes depending on the number and size of your files.
+                    You will see a progress bar above showing the current status.
+                  </s-paragraph>
+                </s-box>
+              ) : null}
+
+              {/* Error Details */}
+              {uploadProgress.status === 'error' && (
+                <s-box padding="base" background="critical-subdued" borderRadius="base">
+                  <s-heading level="5" tone="critical">Error Details</s-heading>
+                  <s-paragraph>{uploadProgress.message}</s-paragraph>
+                  <s-paragraph>
+                    Please check your internet connection and try again. If the problem persists, contact support.
+                  </s-paragraph>
+                </s-box>
+              )}
+
+              {/* Success Message */}
+              {uploadProgress.status === 'completing' && (
+                <s-box padding="base" background="success-subdued" borderRadius="base">
+                  <s-heading level="5" tone="success">🎉 Upload Almost Complete!</s-heading>
+                  <s-paragraph>
+                    Your files have been successfully uploaded to Shopify. Finalizing the results...
+                  </s-paragraph>
+                </s-box>
+              )}
+            </s-stack>
+          </s-box>
+        </s-section>
+      )}
 
       {/* Dry Upload Results Section */}
       {dryResults && (
