@@ -10,7 +10,7 @@ const GoogleDriveConnection = lazy(() => import("../components/GoogleDriveConnec
 // Zod schema for form validation
 const uploadFormSchema = z.object({
   skuTarget: z.string().min(1, "Please select a SKU target option"),
-  conflictResolution: z.string().min(1, "Please select a conflict resolution option"),
+  conflictResolution: z.string().default("rename"), // Default to rename, hidden from UI
 });
 
 type UploadFormData = z.infer<typeof uploadFormSchema>;
@@ -36,6 +36,9 @@ export default function UploadPage() {
   } = useForm<UploadFormData>({
     resolver: zodResolver(uploadFormSchema),
     mode: "onChange",
+    defaultValues: {
+      conflictResolution: "rename" // Set default value
+    },
   });
 
   // Effect to load selected folder from localStorage and sync with Google Drive component
@@ -1194,23 +1197,12 @@ export default function UploadPage() {
               )}
             </s-box>
 
-            <s-box>
-              <s-label required>Conflict Resolution</s-label>
-              <s-select
-                {...register("conflictResolution")}
-                placeholder="Select conflict resolution option"
-                invalid={!!errors.conflictResolution}
-              >
-                <s-option value="">Choose conflict resolution...</s-option>
-                <s-option value="overwrite">Overwrite</s-option>
-                <s-option value="rename">Rename</s-option>
-              </s-select>
-              {errors.conflictResolution && (
-                <s-text-container tone="critical">
-                  <s-text as="p" variant="bodySm">{errors.conflictResolution.message}</s-text>
-                </s-text-container>
-              )}
-            </s-box>
+            {/* Conflict Resolution - Hidden field with default value "rename" */}
+            <input
+              type="hidden"
+              {...register("conflictResolution")}
+              value="rename"
+            />
           </s-stack>
 
           <div style={{ marginTop: '32px' }}>
