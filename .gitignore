@@ -10,6 +10,9 @@ node_modules
 /prisma/dev.sqlite-journal
 database.sqlite
 
+# Ignore Prisma generated files for PostgreSQL
+/prisma/migrations
+
 .env
 .env.*
 

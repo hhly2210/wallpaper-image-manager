@@ -2,7 +2,7 @@
   "name": "wallpaper-image-manager",
   "private": true,
   "scripts": {
-    "build": "react-router build",
+    "build": "prisma migrate deploy && react-router build",
     "dev": "shopify app dev",
     "config:link": "shopify app config link",
     "generate": "shopify app generate",
@@ -17,8 +17,12 @@
     "prisma": "prisma",
     "graphql-codegen": "graphql-codegen",
     "vite": "vite",
+    "db:migrate": "prisma migrate dev",
+    "db:push": "prisma db push",
+    "db:studio": "prisma studio",
+    "db:seed": "tsx prisma/seed.ts",
     "typecheck": "react-router typegen && tsc --noEmit",
-    "postbuild": "prisma migrate deploy"
+    "postinstall": "prisma generate"
   },
   "type": "module",
   "engines": {
@@ -34,6 +38,7 @@
     "@shopify/app-bridge-react": "^4.2.4",
     "@shopify/shopify-app-react-router": "^1.0.0",
     "@shopify/shopify-app-session-storage-prisma": "^7.0.0",
+    "@vercel/postgres": "^0.10.0",
     "form-data": "^4.0.5",
     "gapi": "^0.0.3",
     "googleapis": "^166.0.0",
@@ -64,6 +69,7 @@
     "eslint-plugin-react-hooks": "^4.6.2",
     "graphql-config": "^5.1.1",
     "prettier": "^3.6.2",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vite": "^6.3.6"
   },
