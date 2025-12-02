@@ -2,7 +2,7 @@
 
 client_id = "29f637f47ebc0cbe90473fb301470de3"
 name = "Wallpaper Image Manager"
-application_url = "https://example.com"
+application_url = "https://wallpaper-image-app.lybach1134.click"
 embedded = true
 
 [build]
