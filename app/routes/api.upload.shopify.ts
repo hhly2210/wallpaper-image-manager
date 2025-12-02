@@ -1,6 +1,5 @@
 import { google } from 'googleapis';
 import { authenticate } from "../shopify.server";
-import FormData from 'form-data';
 
 export async function action({ request }: { request: Request }) {
   console.log(`[SERVER] Shopify upload API called`, {
@@ -19,7 +18,7 @@ export async function action({ request }: { request: Request }) {
     });
   }
 
-  const requestId = Math.random().toString(36).substr(2, 9);
+  const requestId = Math.random().toString(36).slice(2, 11);
   console.log(`[${requestId}] API: Shopify upload request started`);
 
   try {
@@ -314,7 +313,7 @@ async function handleFolderUpload(
         }
 
         // Create multipart form data manually for better control
-        const boundary = '----WebKitFormBoundary' + Math.random().toString(36).substr(2, 16);
+        const boundary = '----WebKitFormBoundary' + Math.random().toString(36).slice(2, 18);
         let body = '';
 
         // Add parameters from Shopify
@@ -374,23 +373,90 @@ async function handleFolderUpload(
             statusText: uploadResponse.statusText,
             errorText,
             stagedUrl: stagedTarget.url,
-            stagedHeaders: stagedFormData.getHeaders(),
             fileSize: fileBuffer.length,
             fileName: file.name
           });
           throw new Error(`Staged upload failed: ${uploadResponse.status} ${uploadResponse.statusText}`);
         }
 
-        // Create file in Shopify using the staged upload resource URL
-        // Since the staged upload was successful, the resourceUrl should be accessible
-        // For now, we'll use the resourceUrl directly as the file URL
-        const shopifyFileId = `shopify_${fileData.id}`;
-        const shopifyUrl = stagedTarget.resourceUrl;
+        console.log(`[${requestId}] File successfully uploaded to staged URL, now creating Shopify file asset`);
 
-        console.log(`[${requestId}] Using staged upload URL as Shopify file URL:`, {
+        // Create Shopify file asset using the staged upload resource URL
+        const fileCreateQuery = `
+          mutation fileCreate($files: [FileCreateInput!]!) {
+            fileCreate(files: $files) {
+              files {
+                id
+                fileStatus
+                alt
+                createdAt
+                ... on GenericFile {
+                  url
+                  originalFileSize
+                  mimeType
+                }
+                ... on MediaImage {
+                  image {
+                    width
+                    height
+                  }
+                  originalSource {
+                    url
+                  }
+                }
+              }
+              userErrors {
+                field
+                message
+              }
+            }
+          }
+        `;
+
+        const fileCreateInput = {
+          alt: fileData.name || 'Uploaded image',
+          contentType: "IMAGE",
+          originalSource: stagedTarget.resourceUrl
+        };
+
+        const fileCreateResponse = await admin.graphql(fileCreateQuery, {
+          variables: {
+            files: [fileCreateInput]
+          }
+        });
+
+        const fileCreateData = await fileCreateResponse.json();
+
+        if (fileCreateData?.data?.fileCreate?.userErrors?.length > 0) {
+          throw new Error(fileCreateData.data.fileCreate.userErrors[0].message);
+        }
+
+        const createdFile = fileCreateData?.data?.fileCreate?.files?.[0];
+        if (!createdFile) {
+          throw new Error('Failed to create Shopify file asset');
+        }
+
+        const shopifyFileId = createdFile.id;
+
+        // Get URL from either GenericFile or MediaImage
+        const shopifyUrl = createdFile.url ||
+                          createdFile.originalSource?.url ||
+                          `gid://shopify/MediaImage/${shopifyFileId.split('/').pop()}`;
+
+        console.log(`[${requestId}] File created with details:`, {
           shopifyFileId,
           shopifyUrl,
-          originalResourceUrl: stagedTarget.resourceUrl
+          fileStatus: createdFile.fileStatus,
+          hasDirectUrl: !!createdFile.url,
+          hasOriginalSourceUrl: !!createdFile.originalSource?.url
+        });
+
+        console.log(`[${requestId}] Successfully created Shopify file asset:`, {
+          shopifyFileId,
+          shopifyUrl,
+          fileStatus: createdFile.fileStatus,
+          stagedUploadUrl: stagedTarget.url,
+          resourceUrl: stagedTarget.resourceUrl
         });
 
         // Match file with SKU if configured
@@ -558,6 +624,9 @@ async function handleFileIdsUpload(
     auth.setCredentials({ access_token: accessToken });
     const drive = google.drive({ version: 'v3', auth });
 
+    // Authenticate with Shopify
+    const { admin } = await authenticate.admin(request);
+
     const uploadResults = [];
 
     for (const fileId of fileIds) {
@@ -570,13 +639,163 @@ async function handleFileIdsUpload(
 
         const file = fileResponse.data;
 
-        // Simulate upload to Shopify
+        // Download file content from Google Drive
+        console.log(`[${requestId}] Downloading file content: ${file.name}`);
+        const downloadResponse = await drive.files.get({
+          fileId: fileId,
+          alt: 'media'
+        }, { responseType: 'arraybuffer' });
+
+        const fileBuffer = Buffer.from(downloadResponse.data as ArrayBuffer);
+
+        // Create staged upload target
+        const stagedUploadQuery = `
+          mutation stagedUploadsCreate($input: [StagedUploadInput!]!) {
+            stagedUploadsCreate(input: $input) {
+              stagedTargets {
+                url
+                resourceUrl
+                parameters {
+                  name
+                  value
+                }
+              }
+              userErrors {
+                field
+                message
+              }
+            }
+          }
+        `;
+
+        const stagedUploadInput = {
+          filename: file.name,
+          mimeType: file.mimeType,
+          httpMethod: "POST",
+          resource: "FILE",
+          fileSize: String(file.size || '0')
+        };
+
+        const stagedResponse = await admin.graphql(stagedUploadQuery, {
+          variables: {
+            input: [stagedUploadInput]
+          }
+        });
+
+        const stagedData = await stagedResponse.json();
+
+        if (stagedData?.data?.stagedUploadsCreate?.userErrors?.length > 0) {
+          throw new Error(stagedData.data.stagedUploadsCreate.userErrors[0].message);
+        }
+
+        const stagedTarget = stagedData?.data?.stagedUploadsCreate?.stagedTargets?.[0];
+        if (!stagedTarget) {
+          throw new Error('Failed to get staged upload target');
+        }
+
+        // Upload file to staged URL
+        const boundary = '----WebKitFormBoundary' + Math.random().toString(36).slice(2, 18);
+        let body = '';
+
+        // Add parameters from Shopify
+        if (stagedTarget.parameters) {
+          stagedTarget.parameters.forEach((param: any) => {
+            body += `--${boundary}\r\n`;
+            body += `Content-Disposition: form-data; name="${param.name}"\r\n\r\n`;
+            body += `${param.value}\r\n`;
+          });
+        }
+
+        // Add file content
+        const mimeType = file.mimeType || 'application/octet-stream';
+        body += `--${boundary}\r\n`;
+        body += `Content-Disposition: form-data; name="file"; filename="${file.name || 'unknown-file'}"\r\n`;
+        body += `Content-Type: ${mimeType}\r\n\r\n`;
+
+        const headerBuffer = Buffer.from(body, 'utf8');
+        const footerBuffer = Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8');
+        const finalBuffer = Buffer.concat([headerBuffer, fileBuffer, footerBuffer]);
+
+        const uploadResponse = await fetch(stagedTarget.url, {
+          method: 'POST',
+          body: finalBuffer,
+          headers: {
+            'Content-Type': `multipart/form-data; boundary=${boundary}`,
+            'Content-Length': finalBuffer.length.toString()
+          }
+        });
+
+        if (!uploadResponse.ok) {
+          throw new Error(`Staged upload failed: ${uploadResponse.status} ${uploadResponse.statusText}`);
+        }
+
+        // Create Shopify file asset
+        const fileCreateQuery = `
+          mutation fileCreate($files: [FileCreateInput!]!) {
+            fileCreate(files: $files) {
+              files {
+                id
+                fileStatus
+                alt
+                createdAt
+                ... on GenericFile {
+                  url
+                  originalFileSize
+                  mimeType
+                }
+                ... on MediaImage {
+                  image {
+                    width
+                    height
+                  }
+                  originalSource {
+                    url
+                  }
+                }
+              }
+              userErrors {
+                field
+                message
+              }
+            }
+          }
+        `;
+
+        const fileCreateInput = {
+          alt: file.name || 'Uploaded image',
+          contentType: "IMAGE",
+          originalSource: stagedTarget.resourceUrl
+        };
+
+        const fileCreateResponse = await admin.graphql(fileCreateQuery, {
+          variables: {
+            files: [fileCreateInput]
+          }
+        });
+
+        const fileCreateData = await fileCreateResponse.json();
+
+        if (fileCreateData?.data?.fileCreate?.userErrors?.length > 0) {
+          throw new Error(fileCreateData.data.fileCreate.userErrors[0].message);
+        }
+
+        const createdFile = fileCreateData?.data?.fileCreate?.files?.[0];
+        if (!createdFile) {
+          throw new Error('Failed to create Shopify file asset');
+        }
+
+        // Get URL from either GenericFile or MediaImage
+        const shopifyUrl = createdFile.url ||
+                          createdFile.originalSource?.url ||
+                          `gid://shopify/MediaImage/${createdFile.id.split('/').pop()}`;
+
         uploadResults.push({
           googleFileId: file.id,
           fileName: file.name,
           status: 'success',
-          shopifyFileId: `shopify_${file.id}`,
-          message: 'Successfully uploaded to Shopify',
+          shopifyFileId: createdFile.id,
+          shopifyUrl,
+          message: 'Successfully uploaded to Shopify Files',
         });
 
       } catch (error) {
@@ -584,7 +803,8 @@ async function handleFileIdsUpload(
         uploadResults.push({
           googleFileId: fileId,
           status: 'error',
-          message: 'Failed to upload file to Shopify',
+          message: `Failed to upload: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          error: error instanceof Error ? error.message : 'Unknown error'
         });
       }
     }
