@@ -14,7 +14,9 @@ database.sqlite
 /prisma/migrations
 
 .env
-.env.*
+.env.local
+.env.railway
+.env.*.local
 
 
 
