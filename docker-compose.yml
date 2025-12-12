@@ -54,8 +54,9 @@ services:
       # - PRISMA_DATABASE_URL=${PRISMA_DATABASE_URL}
       # - DATABASE_URL=${DATABASE_URL}
       # Google OAuth credentials
-      - VITE_GOOGLE_CLIENT_ID=${VITE_GOOGLE_CLIENT_ID:-102268048218-vfh3qarg32itgf1urduv0ghls8ekpbdd.apps.googleusercontent.com}
-      - VITE_GOOGLE_CLIENT_SECRET=${VITE_GOOGLE_CLIENT_SECRET:-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}
+      # WARNING: Never hardcode API keys here! Always use environment variables
+      - VITE_GOOGLE_CLIENT_ID=${VITE_GOOGLE_CLIENT_ID}
+      - VITE_GOOGLE_CLIENT_SECRET=${VITE_GOOGLE_CLIENT_SECRET}
     ports:
       - "3000:3000"
     volumes:
