@@ -1,0 +1,101 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: wallpaper-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: wallpaper_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./prisma/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for caching (optional but recommended)
+  redis:
+    image: redis:7-alpine
+    container_name: wallpaper-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # Application (Development)
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: wallpaper-app-dev
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - FRONTEND_PORT=3000
+      # For local development, use PostgreSQL container
+      - PRISMA_DATABASE_URL=postgresql://postgres:password@postgres:5432/wallpaper_db?schema=public
+      - DATABASE_URL=postgresql://postgres:password@postgres:5432/wallpaper_db?schema=public
+      # For Vercel development, uncomment and use these instead:
+      # - PRISMA_DATABASE_URL=${PRISMA_DATABASE_URL}
+      # - DATABASE_URL=${DATABASE_URL}
+      # Google OAuth credentials
+      - VITE_GOOGLE_CLIENT_ID=${VITE_GOOGLE_CLIENT_ID:-102268048218-vfh3qarg32itgf1urduv0ghls8ekpbdd.apps.googleusercontent.com}
+      - VITE_GOOGLE_CLIENT_SECRET=${VITE_GOOGLE_CLIENT_SECRET:-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}
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Prisma Studio for database management (optional)
+  studio:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: wallpaper-studio
+    restart: unless-stopped
+    environment:
+      - PRISMA_DATABASE_URL=postgresql://postgres:password@postgres:5432/wallpaper_db?schema=public
+    ports:
+      - "5555:5555"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: npx prisma studio --browser none --host 0.0.0.0
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  default:
+    name: wallpaper-network

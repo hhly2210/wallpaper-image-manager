@@ -13,7 +13,12 @@ database.sqlite
 # Ignore Prisma generated files for PostgreSQL
 /prisma/migrations
 
+# Environment variables
 .env
+.env.*
+
+# BUT allow example files for documentation
+!.env.example
 
 
 

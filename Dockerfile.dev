@@ -1,0 +1,31 @@
+# Use Node.js 20 LTS as base image for development
+FROM node:20-alpine
+
+# Set working directory
+WORKDIR /app
+
+# Set development environment
+ENV NODE_ENV=development
+
+# Install dependencies for Prisma and development
+RUN apk add --no-cache openssl curl
+
+# Copy package files and prisma schema first
+COPY package.json package-lock.json* ./
+COPY prisma ./prisma/
+
+# Install all dependencies including dev dependencies
+RUN npm install
+
+# Copy all remaining source files
+COPY . .
+
+# Expose port
+EXPOSE 3000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:3000/health || exit 1
+
+# Start command for development
+CMD ["npm", "run", "dev"]

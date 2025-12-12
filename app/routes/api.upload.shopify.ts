@@ -249,6 +249,60 @@ async function handleFolderUpload(
           throw new Error('Invalid file data or missing file name');
         }
 
+        // Match file with SKU if configured (VALIDATE BEFORE UPLOAD)
+        let skuMatch = null;
+        let imageType = null;
+        let shouldUploadFile = true; // Default to true for backward compatibility
+
+        if (config.skuTarget && availableSKUs.length > 0) {
+          console.log(`[${requestId}] Validating file with SKU before upload:`, {
+            fileName: fileData.name,
+            skuTarget: config.skuTarget,
+            availableSKUsCount: availableSKUs.length
+          });
+
+          skuMatch = matchFileWithSKU(fileData.name, availableSKUs, config.skuTarget);
+          imageType = detectImageType(fileData.name);
+
+          console.log(`[${requestId}] Pre-upload validation result:`, {
+            skuMatch: skuMatch ? {
+              sku: skuMatch.sku,
+              productTitle: skuMatch.productTitle,
+              color: skuMatch.color
+            } : null,
+            imageType
+          });
+
+          // IMPORTANT: Only upload files that have both SKU match AND valid image type
+          shouldUploadFile = !!(skuMatch && imageType);
+
+          if (!shouldUploadFile) {
+            console.log(`[${requestId}] Skipping file - no SKU match or invalid image type: ${fileData.name}`);
+
+            // Add to results as skipped
+            uploadResults.push({
+              googleFileId: fileData.id,
+              fileName: fileData.name,
+              fileSize: fileData.size,
+              mimeType: fileData.mimeType,
+              status: 'skipped',
+              shopifyFileId: null,
+              shopifyUrl: null,
+              skuMatch: null,
+              imageType: imageType,
+              reason: !skuMatch ? 'No SKU match found' : 'Invalid or missing image type',
+              uploadedAt: new Date().toISOString()
+            });
+
+            processedCount++;
+            continue; // Skip to next file
+          }
+        } else {
+          // No SKU filtering configured - detect image type for potential future use
+          imageType = detectImageType(fileData.name);
+          console.log(`[${requestId}] No SKU filtering configured - uploading all files. Detected image type: ${imageType}`);
+        }
+
         // Download file content from Google Drive
         console.log(`[${requestId}] Downloading file content: ${file.name}`);
         const downloadResponse = await drive.files.get({
@@ -532,31 +586,7 @@ async function handleFolderUpload(
           resourceUrl: stagedTarget.resourceUrl
         });
 
-        // Match file with SKU if configured
-        let skuMatch = null;
-        let imageType = null;
-
-        if (config.skuTarget && availableSKUs.length > 0) {
-          console.log(`[${requestId}] Matching file with SKU:`, {
-            fileName: fileData.name,
-            skuTarget: config.skuTarget,
-            availableSKUsCount: availableSKUs.length
-          });
-
-          skuMatch = matchFileWithSKU(fileData.name, availableSKUs, config.skuTarget);
-          imageType = detectImageType(fileData.name);
-
-          console.log(`[${requestId}] Matching result:`, {
-            skuMatch: skuMatch ? {
-              sku: skuMatch.sku,
-              productTitle: skuMatch.productTitle,
-              color: skuMatch.color
-            } : null,
-            imageType
-          });
-        }
-
-        // Update metafield if we have a match
+        // Update metafield if we have a match (skuMatch and imageType are already defined above)
         if (skuMatch && imageType) {
           console.log(`[${requestId}] Updating metafield for product ${skuMatch.productId}, color: ${skuMatch.color}, type: ${imageType}`);
 

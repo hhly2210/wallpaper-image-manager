@@ -1170,25 +1170,30 @@ export default function UploadPage() {
     const estimatedUploadTime = Math.round(fileSize / (1024 * 1024) * 2);
     const wouldOverwrite = config.conflictResolution === 'overwrite';
 
-    // Determine success status - SKIP if no SKU match
+    // Determine success status - SKIP if no SKU match OR no valid image type
     let status = 'success';
     let message = '';
     let shouldUpload = true;
 
-    if (!matchedSKU) {
+    const imageType = detectImageType(fileName);
+    const hasValidSKU = !!matchedSKU;
+    const hasValidImageType = !!imageType;
+
+    if (!hasValidSKU || !hasValidImageType) {
       status = 'skipped';
-      message = 'Skipped: No SKU match found';
+
+      if (!hasValidSKU) {
+        message = 'Skipped: No SKU match found';
+      } else {
+        message = 'Skipped: Invalid or missing image type (room/hover required)';
+      }
+
       shouldUpload = false;
     } else {
       message = `Would upload and associate with ${matchedSKU.color ? matchedSKU.color + ' variant' : 'variant'}: ${matchedSKU.sku} (${matchedSKU.productTitle})`;
 
       // Simulate metafield update
-      const imageType = detectImageType(fileName);
-      if (imageType) {
-        message += ` | Metafield Update: ${imageType} image for color "${matchedSKU.color}"`;
-      } else {
-        message += ` | Metafield Update: Skipped (unknown image type)`;
-      }
+      message += ` | Metafield Update: ${imageType} image for color "${matchedSKU.color}"`;
 
       if (matchedSKU.inventoryQuantity === 0) {
         status = 'warning';
