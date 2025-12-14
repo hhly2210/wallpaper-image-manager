@@ -21,7 +21,7 @@ export default function UploadPage() {
   const [dryResults, setDryResults] = useState<any>(null);
   const [uploadResults, setUploadResults] = useState<any>(null);
   const [selectedFolder, setSelectedFolder] = useState<string>('');
-    const [skuData, setSkuData] = useState<any[]>([]);
+  const [skuData, setSkuData] = useState<any[]>([]);
   const [flattenedSKUs, setFlattenedSKUs] = useState<any[]>([]); // For UI display
   const [isLoadingSKUs, setIsLoadingSKUs] = useState(false);
   const [skuError, setSkuError] = useState<string | null>(null);
@@ -43,7 +43,7 @@ export default function UploadPage() {
     percentage: 0
   });
 
-  
+
   const {
     register,
     handleSubmit,
@@ -100,7 +100,7 @@ export default function UploadPage() {
     };
   }, [selectedFolder]);
 
-  
+
   // Helper function for console logging only
   const logProgress = (step: string, details?: string) => {
     const timestamp = new Date().toLocaleTimeString();
@@ -410,7 +410,7 @@ export default function UploadPage() {
     }
   };
 
-  
+
   // Auto-check SKU data availability before dry upload
   const checkSKUDataAvailability = () => {
     console.log('🔍 SKU DATA CHECK:', {
@@ -648,7 +648,7 @@ export default function UploadPage() {
       logProgress('BƯỚC 5', 'Hiển thị kết quả cho người dùng');
 
       const realTests = dryUploadResults.realMetafieldTests || {};
-    const message = `🧪 Dry Upload Complete!\n\n` +
+      const message = `🧪 Dry Upload Complete!\n\n` +
         `📁 Total files found: ${dryUploadResults.totalFiles}\n` +
         `✅ Will upload: ${dryUploadResults.successCount}\n` +
         `⏭️ Skipped (no SKU match): ${dryUploadResults.skippedCount}\n` +
@@ -985,12 +985,12 @@ export default function UploadPage() {
           // Check if filename starts with SKU (prefix match)
           // This handles cases like: WP-BANK-SKY-2424-ROOM matches WP-BANK-SKY-2424
           const isPrefixMatch = fileNameClean.startsWith(skuClean) ||
-                                fileNameWithoutExt.toLowerCase().startsWith(sku.sku.toLowerCase());
+            fileNameWithoutExt.toLowerCase().startsWith(sku.sku.toLowerCase());
 
           // Keep existing exact matches as fallback
           const isExactMatch = skuClean === fileNameClean ||
-                              sku.sku.toLowerCase() === fileNameWithoutExt ||
-                              fileNameWithoutExt.includes(sku.sku.toLowerCase());
+            sku.sku.toLowerCase() === fileNameWithoutExt ||
+            fileNameWithoutExt.includes(sku.sku.toLowerCase());
 
           return isPrefixMatch || isExactMatch;
         });
@@ -1003,12 +1003,12 @@ export default function UploadPage() {
           const fileNameClean = fileNameWithoutExt.replace(/[-_\s]/g, '');
 
           const isPrefixMatch = fileNameClean.startsWith(skuClean) ||
-                                fileNameWithoutExt.toLowerCase().startsWith(matchedSKU.sku.toLowerCase());
+            fileNameWithoutExt.toLowerCase().startsWith(matchedSKU.sku.toLowerCase());
           const isExactMatch = skuClean === fileNameClean ||
-                              matchedSKU.sku.toLowerCase() === fileNameWithoutExt;
+            matchedSKU.sku.toLowerCase() === fileNameWithoutExt;
 
           const matchType = isPrefixMatch ? 'PREFIX' :
-                          isExactMatch ? 'EXACT' : 'CONTAINS';
+            isExactMatch ? 'EXACT' : 'CONTAINS';
 
           logProgress(`  ✅ Exact Match`, `${fileName} → SKU: ${matchedSKU.sku} (${matchType}) → Product: ${matchedSKU.productTitle}`);
           if (matchedSKU.color) {
@@ -1033,13 +1033,13 @@ export default function UploadPage() {
 
           // Priority 1: Prefix match - filename starts with SKU (WP-BANK-SKY-2424-ROOM starts with WP-BANK-SKY-2424)
           const isPrefixMatch = fileNameClean.startsWith(skuClean) ||
-                                fileNameWithoutExt.toLowerCase().startsWith(sku.sku.toLowerCase());
+            fileNameWithoutExt.toLowerCase().startsWith(sku.sku.toLowerCase());
 
           // Priority 2: Contains match - filename contains SKU somewhere
           const isContainsMatch = fileNameWithoutExt.includes(sku.sku.toLowerCase()) ||
-                                 fileNameClean.includes(skuClean) ||
-                                 sku.sku.toLowerCase().includes(fileNameWithoutExt) ||
-                                 skuClean.includes(fileNameClean);
+            fileNameClean.includes(skuClean) ||
+            sku.sku.toLowerCase().includes(fileNameWithoutExt) ||
+            skuClean.includes(fileNameClean);
 
           return isPrefixMatch || isContainsMatch;
         });
@@ -1053,14 +1053,14 @@ export default function UploadPage() {
 
             // Check if it's a prefix match (highest priority)
             const isPrefixMatch = fileNameClean.startsWith(skuClean) ||
-                                fileNameWithoutExt.toLowerCase().startsWith(sku.sku.toLowerCase());
+              fileNameWithoutExt.toLowerCase().startsWith(sku.sku.toLowerCase());
 
             // Check if it's an exact match (medium priority)
             const isExactMatch = fileNameClean === skuClean;
 
             // Check if it's a contains match (lowest priority)
             const isContainsMatch = fileNameClean.includes(skuClean) ||
-                                  fileNameWithoutExt.includes(sku.sku.toLowerCase());
+              fileNameWithoutExt.includes(sku.sku.toLowerCase());
 
             // Calculate score with priority weighting
             let score = 0;
@@ -1111,8 +1111,8 @@ export default function UploadPage() {
           if (bestMatch) {
             const matchInfo = specificMatches.find(m => m.sku === bestMatch);
             const matchType = matchInfo?.isPrefixMatch ? 'PREFIX' :
-                            matchInfo?.isExactMatch ? 'EXACT' :
-                            matchInfo?.isContainsMatch ? 'CONTAINS' : 'UNKNOWN';
+              matchInfo?.isExactMatch ? 'EXACT' :
+                matchInfo?.isContainsMatch ? 'CONTAINS' : 'UNKNOWN';
 
             logProgress(`  🎯 Smart Match`, `Selected SKU: ${bestMatch.sku} → Product: ${bestMatch.productTitle} (${matchType})`);
             if (bestMatch.color) {
@@ -1170,25 +1170,30 @@ export default function UploadPage() {
     const estimatedUploadTime = Math.round(fileSize / (1024 * 1024) * 2);
     const wouldOverwrite = config.conflictResolution === 'overwrite';
 
-    // Determine success status - SKIP if no SKU match
+    // Determine success status - SKIP if no SKU match OR no valid image type
     let status = 'success';
     let message = '';
     let shouldUpload = true;
 
-    if (!matchedSKU) {
+    const imageType = detectImageType(fileName);
+    const hasValidSKU = !!matchedSKU;
+    const hasValidImageType = !!imageType;
+
+    if (!hasValidSKU || !hasValidImageType) {
       status = 'skipped';
-      message = 'Skipped: No SKU match found';
+
+      if (!hasValidSKU) {
+        message = 'Skipped: No SKU match found';
+      } else {
+        message = 'Skipped: Invalid or missing image type (room/hover required)';
+      }
+
       shouldUpload = false;
     } else {
       message = `Would upload and associate with ${matchedSKU.color ? matchedSKU.color + ' variant' : 'variant'}: ${matchedSKU.sku} (${matchedSKU.productTitle})`;
 
       // Simulate metafield update
-      const imageType = detectImageType(fileName);
-      if (imageType) {
-        message += ` | Metafield Update: ${imageType} image for color "${matchedSKU.color}"`;
-      } else {
-        message += ` | Metafield Update: Skipped (unknown image type)`;
-      }
+      message += ` | Metafield Update: ${imageType} image for color "${matchedSKU.color}"`;
 
       if (matchedSKU.inventoryQuantity === 0) {
         status = 'warning';
@@ -1332,7 +1337,7 @@ export default function UploadPage() {
         <s-section heading="Upload Progress">
           <s-box padding="base" borderWidth="base" borderRadius="base" background={
             uploadProgress.status === 'error' ? 'critical-subdued' :
-            uploadProgress.status === 'completing' ? 'success-subdued' : 'info-subdued'
+              uploadProgress.status === 'completing' ? 'success-subdued' : 'info-subdued'
           }>
             <s-stack direction="block" gap="base">
               <s-heading level="4">
@@ -1365,7 +1370,7 @@ export default function UploadPage() {
                     width: `${uploadProgress.percentage}%`,
                     height: '100%',
                     backgroundColor: uploadProgress.status === 'error' ? '#dc2626' :
-                                     uploadProgress.status === 'completing' ? '#059669' : '#2563eb',
+                      uploadProgress.status === 'completing' ? '#059669' : '#2563eb',
                     transition: 'width 0.3s ease-in-out',
                     display: 'flex',
                     alignItems: 'center',
@@ -1527,8 +1532,8 @@ export default function UploadPage() {
                         padding: '4px',
                         borderBottom: '1px solid #e5e7eb',
                         color: result.status === 'success' ? '#059669' :
-       result.status === 'warning' ? '#d97706' :
-       result.status === 'skipped' ? '#6b7280' : '#dc2626'
+                          result.status === 'warning' ? '#d97706' :
+                            result.status === 'skipped' ? '#6b7280' : '#dc2626'
                       }}>
                         <strong>{result.fileName}</strong><br />
                         Status: {result.status.toUpperCase()}<br />
@@ -1663,6 +1668,6 @@ export default function UploadPage() {
         </s-section>
       )}
 
-          </s-page>
+    </s-page>
   );
 }
