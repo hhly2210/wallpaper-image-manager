@@ -1,156 +1,179 @@
-import { google } from 'googleapis';
+import { googleDriveService } from "../services/googleDriveService";
+import { getRateLimiterStatus } from "../lib/rateLimiter";
 
 export async function action({ request }: { request: Request }) {
   if (request.method !== "POST") {
-    return new Response(JSON.stringify({
-      error: "Method not allowed",
-      method: request.method,
-      timestamp: new Date().toISOString()
-    }), {
-      status: 405,
-      headers: { "Content-Type": "application/json" }
-    });
+    return new Response(
+      JSON.stringify({
+        error: "Method not allowed",
+        method: request.method,
+        timestamp: new Date().toISOString(),
+      }),
+      {
+        status: 405,
+        headers: { "Content-Type": "application/json" },
+      },
+    );
   }
 
   const requestId = Math.random().toString(36).substr(2, 9);
-  console.log(`[${requestId}] API: Folders request started`);
+  console.log(`[${requestId}] 🚀 Rate-limited API: Folders request started`);
 
   try {
     const { accessToken } = await request.json();
 
     console.log(`[${requestId}] Request data:`, {
       hasAccessToken: !!accessToken,
-      accessTokenLength: accessToken?.length || 0
+      accessTokenLength: accessToken?.length || 0,
     });
 
     if (!accessToken) {
       console.log(`[${requestId}] ERROR: Access token missing`);
-      return new Response(JSON.stringify({
-        error: "Access token is required",
-        requestId,
-        timestamp: new Date().toISOString()
-      }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" }
-      });
+      return new Response(
+        JSON.stringify({
+          error: "Access token is required",
+          requestId,
+          timestamp: new Date().toISOString(),
+        }),
+        {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
     }
 
-    // Initialize Google Drive service with access token
-    console.log(`[${requestId}] Initializing Google Drive service...`);
-    const auth = new google.auth.OAuth2();
-    auth.setCredentials({ access_token: accessToken });
-    const drive = google.drive({ version: 'v3', auth });
+    // Get current rate limiter status for monitoring
+    const rateLimitStatus = getRateLimiterStatus();
+    console.log(`[${requestId}] 📊 Rate Limiter Status:`, rateLimitStatus);
 
-    const query = "mimeType = 'application/vnd.google-apps.folder' and trashed=false and ('root' in parents or sharedWithMe = true)";
-    console.log(`[${requestId}] Query:`, query);
-
-    console.log(`[${requestId}] Executing drive.files.list for folders...`);
+    console.log(`[${requestId}] ⏳ Executing rate-limited folders request...`);
     const startTime = Date.now();
 
-    const response = await drive.files.list({
-      q: query,
-      fields: 'files(id, name, createdTime, shared, permissions, owners)',
-      pageSize: 100,
-    });
+    // Use rate-limited Google Drive service
+    const folders = await googleDriveService.listFolders(accessToken);
 
     const duration = Date.now() - startTime;
-    const folders = response.data.files || [];
 
-    console.log(`[${requestId}] SUCCESS: Found ${folders.length} folders in ${duration}ms`, {
-      folderCount: folders.length,
-      duration,
-      query,
-      responseStatus: response.status,
-      responseHeaders: response.headers
+    console.log(
+      `[${requestId}] ✅ Rate-limited SUCCESS: Found ${folders.length} folders in ${duration}ms`,
+      {
+        folderCount: folders.length,
+        duration,
+        rateLimited: true,
+        service: "googleDriveService",
+      },
+    );
+
+    // Log folder processing info
+    console.log(`[${requestId}] Processed ${folders.length} folders`, {
+      ownedByMe: folders.filter((f) => f.isOwnedByMe).length,
+      shared: folders.filter((f) => f.isShared).length,
     });
 
-    // Process folders to add shared status and owner information
-    console.log(`[${requestId}] Processing folder data...`);
-    const processedFolders = folders.map(folder => {
-      const isShared = folder.shared || (folder.permissions && folder.permissions.length > 1);
-      const owner = folder.owners && folder.owners.length > 0 ? folder.owners[0].displayName : 'Me';
-      const isOwnedByMe = owner === 'Me';
-
-      return {
-        id: folder.id,
-        name: folder.name,
-        createdTime: folder.createdTime,
-        isShared,
-        owner,
-        isOwnedByMe
-      };
-    });
-
-    // Sort folders: owned by me first, then shared with me
-    processedFolders.sort((a, b) => {
-      if (a.isOwnedByMe && !b.isOwnedByMe) return -1;
-      if (!a.isOwnedByMe && b.isOwnedByMe) return 1;
-      return a.name.localeCompare(b.name);
-    });
-
-    console.log(`[${requestId}] Processed ${processedFolders.length} folders`, {
-      ownedByMe: processedFolders.filter(f => f.isOwnedByMe).length,
-      shared: processedFolders.filter(f => f.isShared).length
-    });
+    // Get updated rate limiter status after the call
+    const updatedRateLimitStatus = getRateLimiterStatus();
 
     return new Response(
       JSON.stringify({
         success: true,
-        data: processedFolders,
+        data: folders,
         requestId,
         timestamp: new Date().toISOString(),
-        query,
-        totalFolders: processedFolders.length
+        totalFolders: folders.length,
+        rateLimiting: {
+          enabled: true,
+          implementation: "TanStack Pacer",
+          status: updatedRateLimitStatus,
+        },
       }),
       {
         headers: {
           "Content-Type": "application/json",
+          "X-Rate-Limit-Limit": "10000",
+          "X-Rate-Limit-Window": "60000",
+          "X-Rate-Limit-Remaining":
+            updatedRateLimitStatus.remainingInWindow.toString(),
+          "X-Rate-Limit-Max-RPS": "200", // Maximum requests per second
         },
-      }
+      },
     );
-
   } catch (error) {
-    console.error(`[${requestId}] ERROR: Drive API call failed:`, {
-      error: error instanceof Error ? error.message : 'Unknown error',
+    console.error(`[${requestId}] ERROR: Rate-limited Drive API call failed:`, {
+      error: error instanceof Error ? error.message : "Unknown error",
       stack: error instanceof Error ? error.stack : undefined,
       name: error instanceof Error ? error.name : undefined,
       code: (error as any)?.code,
       requestId,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     });
 
-    // Provide more detailed error information
+    // Provide more detailed error information with rate limiting context
     let errorMessage = "Failed to list folders";
     let statusCode = 500;
 
     if (error instanceof Error) {
-      if (error.message.includes('invalid_grant')) {
+      if (error.message.includes("invalid_grant")) {
         errorMessage = "Access token expired or invalid";
         statusCode = 401;
-      } else if (error.message.includes('forbidden')) {
+      } else if (error.message.includes("forbidden")) {
         errorMessage = "Access denied - insufficient permissions";
         statusCode = 403;
-      } else if (error.message.includes('notFound')) {
+      } else if (error.message.includes("notFound")) {
         errorMessage = "Root folder not found";
         statusCode = 404;
-      } else if (error.message.includes('quotaExceeded')) {
-        errorMessage = "Google Drive quota exceeded";
+      } else if (
+        error.message.includes("quotaExceeded") ||
+        error.message.includes("rateLimit") ||
+        error.message.includes("too many requests")
+      ) {
+        errorMessage =
+          "Google Drive API rate limit exceeded - request has been queued";
         statusCode = 429;
+      } else if (error.message.includes("timeout")) {
+        errorMessage = "Request timeout - please try again";
+        statusCode = 408;
       }
     }
 
-    return new Response(JSON.stringify({
-      error: errorMessage,
-      requestId,
-      timestamp: new Date().toISOString(),
-      details: error instanceof Error ? {
-        message: error.message,
-        name: error.name,
-        code: (error as any)?.code
-      } : error
-    }), {
-      status: statusCode,
-      headers: { "Content-Type": "application/json" }
-    });
+    // Get current rate limiter status for error response
+    const rateLimitStatus = getRateLimiterStatus();
+
+    return new Response(
+      JSON.stringify({
+        error: errorMessage,
+        requestId,
+        timestamp: new Date().toISOString(),
+        rateLimiting: {
+          enabled: true,
+          implementation: "TanStack Pacer",
+          status: rateLimitStatus,
+          retryAfter: rateLimitStatus.msUntilNextWindow,
+        },
+        details:
+          error instanceof Error
+            ? {
+                message: error.message,
+                name: error.name,
+                code: (error as any)?.code,
+              }
+            : error,
+      }),
+      {
+        status: statusCode,
+        headers: {
+          "Content-Type": "application/json",
+          "X-Rate-Limit-Limit": "10000",
+          "X-Rate-Limit-Window": "60000",
+          "X-Rate-Limit-Remaining":
+            rateLimitStatus.remainingInWindow.toString(),
+          "X-Rate-Limit-Max-RPS": "200", // Maximum requests per second
+          ...(statusCode === 429 && {
+            "Retry-After": Math.ceil(
+              rateLimitStatus.msUntilNextWindow / 1000,
+            ).toString(),
+          }),
+        },
+      },
+    );
   }
 }
