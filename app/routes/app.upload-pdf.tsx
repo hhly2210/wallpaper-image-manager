@@ -4,7 +4,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { googleAuth } from "../services/googleAuth";
 
-// Lazy load the Google Drive connection component
+// Lazy load the Google Drive connection component (now supports both image and PDF files)
 const GoogleDriveConnection = lazy(() => import("../components/GoogleDriveConnection.client"));
 
 // Zod schema for form validation
@@ -15,7 +15,7 @@ const uploadFormSchema = z.object({
 
 type UploadFormData = z.infer<typeof uploadFormSchema>;
 
-export default function UploadPage() {
+export default function UploadPdfPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDryRunning, setIsDryRunning] = useState(false);
   const [dryResults, setDryResults] = useState<any>(null);
@@ -155,7 +155,7 @@ export default function UploadPage() {
         percentage: 5
       });
 
-      const response = await fetch('/api/upload/shopify', {
+      const response = await fetch('/api/upload/pdf/shopify', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -189,14 +189,24 @@ export default function UploadPage() {
       // Save upload results
       setUploadResults(result);
 
+      // Debug log to check the response data
+      console.log('📊 Upload Result Data:', {
+        totalFiles: result.totalFiles,
+        uploadedFiles: result.uploadedFiles,
+        matchedFiles: result.matchedFiles,
+        metafieldUpdates: result.metafieldUpdates,
+        failedFiles: result.failedFiles,
+        fullResult: result
+      });
+
       // Show success message
       const message = `🎉 Upload Complete!\n\n` +
         `📁 Total files: ${result.totalFiles}\n` +
         `✅ Successfully uploaded: ${result.uploadedFiles}\n` +
         `🔗 Products matched: ${result.matchedFiles || 0}\n` +
-        `🖼️ Metafields updated: ${result.metafieldUpdates || 0}\n` +
+        `📋 Spec sheet metafields updated: ${result.metafieldUpdates || 0}\n` +
         `${result.failedFiles > 0 ? `❌ Failed: ${result.failedFiles}\n` : ''}` +
-        `\nYour images have been uploaded to Shopify and linked to the corresponding products!`;
+        `\nYour PDF spec sheets have been uploaded to Shopify!`;
 
       setTimeout(() => {
         alert(message);
@@ -661,7 +671,7 @@ export default function UploadPage() {
         `📋 Configuration:\n` +
         `• SKU Target: ${dryUploadResults.config.skuTarget}\n` +
         `• Conflict Resolution: ${dryUploadResults.config.conflictResolution}\n\n` +
-        `💡 Files with SKU matches were checked for current metafield values.\n` +
+        `💡 PDF spec sheets with SKU matches will update the custom.spec_sheet_pdf metafield.\n` +
         `This was a simulation - no files were uploaded, no metafields were updated.`;
 
       alert(message);
@@ -690,9 +700,9 @@ export default function UploadPage() {
 
     try {
       // Step 3.1: Tạo query và gọi API
-      logProgress('📝 Building Query', `'${folderId}' in parents and (mimeType contains 'image/') and trashed=false`);
+      logProgress('📝 Building Query', `'${folderId}' in parents and (mimeType contains 'pdf') and trashed=false`);
 
-      const query = `'${folderId}' in parents and (mimeType contains 'image/') and trashed=false`;
+      const query = `'${folderId}' in parents and (mimeType contains 'pdf') and trashed=false`;
       const apiUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name,mimeType,size,createdTime,webViewLink)&pageSize=1000`;
 
       logProgress('🌐 API Call', `Gọi API: ${apiUrl.substring(0, 100)}...`);
@@ -716,10 +726,10 @@ export default function UploadPage() {
       const data = await response.json();
       const files = data.files || [];
 
-      logProgress('📁 Files Found', `Tìm thấy ${files.length} image files trong folder`);
+      logProgress('📁 Files Found', `Tìm thấy ${files.length} PDF files trong folder`);
 
       if (files.length === 0) {
-        logProgress('ℹ️ Empty Folder', 'Folder không chứa image files nào');
+        logProgress('ℹ️ Empty Folder', 'Folder không chứa PDF files nào');
         return {
           dryRun: true,
           folderId,
@@ -775,10 +785,10 @@ export default function UploadPage() {
               const mf = simulatedResult.metafieldUpdate;
               if (mf.wouldUpdate) {
                 metafieldUpdates++;
-                logProgress(`  🔗 Metafield Update ${fileNumber}`, `${file.name} → ${mf.imageType} image for "${mf.color}"`);
-                logProgress(`     📝 Target`, `Product ID: ${mf.productId}`);
+                logProgress(`  🔗 Metafield Update ${fileNumber}`, `${file.name} → ${mf.metafieldKey} (${mf.metafieldType}) for ${mf.productTitle}`);
+                logProgress(`     📝 Target`, `Product ID: ${mf.productId} • SKU: ${mf.sku}`);
               } else {
-                logProgress(`  ⏸️ Metafield Skipped ${fileNumber}`, `${file.name} → Unknown image type`);
+                logProgress(`  ⏸️ Metafield Skipped ${fileNumber}`, `${file.name} → Metafield not updated`);
               }
             }
           } else if (simulatedResult.status === 'warning') {
@@ -799,10 +809,10 @@ export default function UploadPage() {
               const mf = simulatedResult.metafieldUpdate;
               if (mf.wouldUpdate) {
                 metafieldUpdates++;
-                logProgress(`  🔗 Metafield Update ${fileNumber}`, `${file.name} → ${mf.imageType} image for "${mf.color}"`);
-                logProgress(`     📝 Target`, `Product ID: ${mf.productId}`);
+                logProgress(`  🔗 Metafield Update ${fileNumber}`, `${file.name} → ${mf.metafieldKey} (${mf.metafieldType}) for ${mf.productTitle}`);
+                logProgress(`     📝 Target`, `Product ID: ${mf.productId} • SKU: ${mf.sku}`);
               } else {
-                logProgress(`  ⏸️ Metafield Skipped ${fileNumber}`, `${file.name} → Unknown image type`);
+                logProgress(`  ⏸️ Metafield Skipped ${fileNumber}`, `${file.name} → Metafield not updated`);
               }
             }
           } else if (simulatedResult.status === 'skipped') {
@@ -932,15 +942,15 @@ export default function UploadPage() {
     const mimeType = file.mimeType || '';
 
     // Step: File validation
-    const isValidImage = mimeType.startsWith('image/');
-    if (!isValidImage) {
+    const isValidPdf = mimeType.includes('pdf') || fileName.toLowerCase().endsWith('.pdf');
+    if (!isValidPdf) {
       return {
         googleFileId: file.id,
         fileName,
         fileSize,
         mimeType,
-        status: 'error',
-        message: 'Invalid image format'
+        status: 'skipped',
+        message: 'Skipped: Not a PDF file'
       };
     }
 
@@ -968,195 +978,110 @@ export default function UploadPage() {
       };
     }
 
-    // Step: Enhanced SKU matching logic
+    // Step: Enhanced SKU matching logic for PDF (partial match)
     let matchedSKU = null;
     let skuMatchType = 'none';
     let matchDetails = null;
 
     if (availableSKUs.length > 0) {
       const fileNameWithoutExt = fileName.replace(/\.[^/.]+$/, '').toLowerCase();
-      const fileNameClean = fileNameWithoutExt.replace(/[-_\s]/g, ''); // Remove separators
 
-      if (config.skuTarget === 'exact-sku') {
-        // Exact match with SKU - check if filename starts with SKU (handles WP-BANK-SKY-2424-ROOM format)
-        matchedSKU = availableSKUs.find(sku => {
-          const skuClean = sku.sku.toLowerCase().replace(/[-_\s]/g, '');
-          const fileNameClean = fileNameWithoutExt.replace(/[-_\s]/g, '');
-
-          // Check if filename starts with SKU (prefix match)
-          // This handles cases like: WP-BANK-SKY-2424-ROOM matches WP-BANK-SKY-2424
-          const isPrefixMatch = fileNameClean.startsWith(skuClean) ||
-            fileNameWithoutExt.toLowerCase().startsWith(sku.sku.toLowerCase());
-
-          // Keep existing exact matches as fallback
-          const isExactMatch = skuClean === fileNameClean ||
-            sku.sku.toLowerCase() === fileNameWithoutExt ||
-            fileNameWithoutExt.includes(sku.sku.toLowerCase());
-
-          return isPrefixMatch || isExactMatch;
-        });
-
-        skuMatchType = matchedSKU ? 'exact' : 'none';
-
-        // Add detailed logging for exact matches
-        if (matchedSKU) {
-          const skuClean = matchedSKU.sku.toLowerCase().replace(/[-_\s]/g, '');
-          const fileNameClean = fileNameWithoutExt.replace(/[-_\s]/g, '');
-
-          const isPrefixMatch = fileNameClean.startsWith(skuClean) ||
-            fileNameWithoutExt.toLowerCase().startsWith(matchedSKU.sku.toLowerCase());
-          const isExactMatch = skuClean === fileNameClean ||
-            matchedSKU.sku.toLowerCase() === fileNameWithoutExt;
-
-          const matchType = isPrefixMatch ? 'PREFIX' :
-            isExactMatch ? 'EXACT' : 'CONTAINS';
-
-          logProgress(`  ✅ Exact Match`, `${fileName} → SKU: ${matchedSKU.sku} (${matchType}) → Product: ${matchedSKU.productTitle}`);
-          if (matchedSKU.color) {
-            logProgress(`     🎨 Variant Details`, `Color: ${matchedSKU.color} • Price: $${matchedSKU.price} • Stock: ${matchedSKU.inventoryQuantity}`);
-          }
-        } else {
-          // Log when no SKU match is found for debugging
-          logProgress(`  ❌ No Match`, `${fileName} → No matching SKU found`);
-          logProgress(`     📝 Debug Info`, `Clean filename: ${fileNameWithoutExt.replace(/[-_\s]/g, '')}`);
-          if (availableSKUs.length > 0) {
-            logProgress(`     📦 Available SKUs`, `${availableSKUs.length} SKUs available for matching`);
-            // Show first few SKUs for debugging
-            const sampleSKUs = availableSKUs.slice(0, 3).map(s => s.sku).join(', ');
-            logProgress(`     🔍 Sample SKUs`, sampleSKUs + (availableSKUs.length > 3 ? '...' : ''));
-          }
+      // Extract the base part from filename (before '-spec' or similar)
+      let baseFileName = fileNameWithoutExt;
+      const specPatterns = ['-spec', '_spec', '-specs', '_specs', '-documentation', '_docs'];
+      for (const pattern of specPatterns) {
+        if (fileNameWithoutExt.includes(pattern)) {
+          baseFileName = fileNameWithoutExt.split(pattern)[0].trim();
+          break;
         }
+      }
 
-      } else if (config.skuTarget === 'contains-sku') {
-        // Enhanced contains match with SKU and color - improved logic for WP-BANK-SKY-2424-XXX format
-        const potentialMatches = availableSKUs.filter(sku => {
+      logProgress(`  📋 Processing`, `File: ${fileName} → Base: ${baseFileName}`);
+
+      // Group SKUs by product to find partial matches
+      const productsMap = new Map<string, any[]>();
+
+      availableSKUs.forEach(sku => {
+        if (!sku || !sku.sku || !sku.productId) return;
+
+        if (!productsMap.has(sku.productId)) {
+          productsMap.set(sku.productId, []);
+        }
+        productsMap.get(sku.productId)!.push(sku);
+      });
+
+      // Check each product for partial match
+      for (const [productId, productSKUs] of productsMap.entries()) {
+        for (const sku of productSKUs) {
+          if (!sku.sku) continue;
+
           const skuClean = sku.sku.toLowerCase().replace(/[-_\s]/g, '');
+          const baseFileNameClean = baseFileName.replace(/[-_\s]/g, '');
 
-          // Priority 1: Prefix match - filename starts with SKU (WP-BANK-SKY-2424-ROOM starts with WP-BANK-SKY-2424)
-          const isPrefixMatch = fileNameClean.startsWith(skuClean) ||
-            fileNameWithoutExt.toLowerCase().startsWith(sku.sku.toLowerCase());
-
-          // Priority 2: Contains match - filename contains SKU somewhere
-          const isContainsMatch = fileNameWithoutExt.includes(sku.sku.toLowerCase()) ||
-            fileNameClean.includes(skuClean) ||
-            sku.sku.toLowerCase().includes(fileNameWithoutExt) ||
-            skuClean.includes(fileNameClean);
-
-          return isPrefixMatch || isContainsMatch;
-        });
-
-        // Smart matching strategy for multiple potential matches
-        if (potentialMatches.length > 1) {
-          // Strategy 1: Most specific match (prioritize prefix matches)
-          const specificMatches = potentialMatches.map(sku => {
-            const skuClean = sku.sku.toLowerCase().replace(/[-_\s]/g, '');
-            const fileNameClean = fileNameWithoutExt.replace(/[-_\s]/g, '');
-
-            // Check if it's a prefix match (highest priority)
-            const isPrefixMatch = fileNameClean.startsWith(skuClean) ||
-              fileNameWithoutExt.toLowerCase().startsWith(sku.sku.toLowerCase());
-
-            // Check if it's an exact match (medium priority)
-            const isExactMatch = fileNameClean === skuClean;
-
-            // Check if it's a contains match (lowest priority)
-            const isContainsMatch = fileNameClean.includes(skuClean) ||
-              fileNameWithoutExt.includes(sku.sku.toLowerCase());
-
-            // Calculate score with priority weighting
-            let score = 0;
-            if (isPrefixMatch) {
-              score = (fileNameClean.length + skuClean.length) * 3; // Highest weight
-            } else if (isExactMatch) {
-              score = (fileNameClean.length + skuClean.length) * 2; // Medium weight
-            } else if (isContainsMatch) {
-              score = fileNameClean.length + skuClean.length; // Lowest weight
-            }
-
-            return {
-              sku,
-              score,
-              isPrefixMatch,
-              isExactMatch,
-              isContainsMatch
+          // Check if base filename matches the beginning of SKU (partial match)
+          if (skuClean.startsWith(baseFileNameClean)) {
+            matchedSKU = sku;
+            skuMatchType = 'partial';
+            matchDetails = {
+              fileName: fileName,
+              baseFileName: baseFileName,
+              matchedSku: sku.sku,
+              matchedProduct: sku.productTitle
             };
+            logProgress(`  ✅ Partial Match`, `${fileName} → ${baseFileName} matches ${sku.sku} → Product: ${sku.productTitle}`);
+            if (sku.color) {
+              logProgress(`     🎨 Variant Details`, `Color: ${sku.color} • Price: $${sku.price} • Stock: ${sku.inventoryQuantity}`);
+            }
+            break;
+          }
+
+          // Also check reverse - if base filename starts with SKU
+          if (baseFileNameClean.startsWith(skuClean)) {
+            matchedSKU = sku;
+            skuMatchType = 'partial-reverse';
+            matchDetails = {
+              fileName: fileName,
+              baseFileName: baseFileName,
+              matchedSku: sku.sku,
+              matchedProduct: sku.productTitle
+            };
+            logProgress(`  ✅ Reverse Match`, `${fileName} → ${baseFileName} matches ${sku.sku} → Product: ${sku.productTitle}`);
+            if (sku.color) {
+              logProgress(`     🎨 Variant Details`, `Color: ${sku.color} • Price: $${sku.price} • Stock: ${sku.inventoryQuantity}`);
+            }
+            break;
+          }
+        }
+        if (matchedSKU) break; // Found a match, stop searching
+      }
+
+      if (!matchedSKU) {
+        logProgress(`  ❌ No Match`, `${fileName} → No partial SKU match found`);
+        logProgress(`     📝 Debug Info`, `Base filename: ${baseFileName}`);
+        if (availableSKUs.length > 0) {
+          logProgress(`     📦 Available Products`, `${productsMap.size} products available for matching`);
+          // Show first few products/SKUs for debugging
+          const sampleProducts = Array.from(productsMap.entries()).slice(0, 2);
+          sampleProducts.forEach(([productId, skus]) => {
+            logProgress(`     🔍 Product`, `${skus[0].productTitle} (${skus.map(s => s.sku).join(', ')})`);
           });
-
-          // Sort by score (longer overlap = better match)
-          specificMatches.sort((a, b) => b.score - a.score);
-
-          // Strategy 2: Check for variant options matching in filename
-          const fileNameTokens = fileNameWithoutExt.split(/[-_\s]/).filter(Boolean);
-          let bestMatch = specificMatches[0]?.sku;
-
-          // Strategy 3: Try to match any variant option value
-          if (fileNameTokens.length > 1) {
-            for (const token of fileNameTokens) {
-              const optionMatch = potentialMatches.find(sku => {
-                if (!sku.options?.selectedOptions) return false;
-                return sku.options.selectedOptions.some((opt: any) =>
-                  opt.value.toLowerCase().includes(token.toLowerCase()) ||
-                  token.toLowerCase().includes(opt.value.toLowerCase())
-                );
-              });
-              if (optionMatch) {
-                bestMatch = optionMatch;
-                break;
-              }
-            }
-          }
-
-          matchedSKU = bestMatch || specificMatches[0]?.sku || potentialMatches[0];
-
-          // Log matching details
-          if (bestMatch) {
-            const matchInfo = specificMatches.find(m => m.sku === bestMatch);
-            const matchType = matchInfo?.isPrefixMatch ? 'PREFIX' :
-              matchInfo?.isExactMatch ? 'EXACT' :
-                matchInfo?.isContainsMatch ? 'CONTAINS' : 'UNKNOWN';
-
-            logProgress(`  🎯 Smart Match`, `Selected SKU: ${bestMatch.sku} → Product: ${bestMatch.productTitle} (${matchType})`);
-            if (bestMatch.color) {
-              logProgress(`     🎨 Color Variant`, `${bestMatch.color} • Price: $${bestMatch.price} • Stock: ${bestMatch.inventoryQuantity}`);
-            }
-          } else {
-            logProgress(`  🎲 Fallback Match`, `Using: ${matchedSKU.sku} → Product: ${matchedSKU.productTitle}`);
-          }
-        } else if (potentialMatches.length === 1) {
-          matchedSKU = potentialMatches[0];
-          logProgress(`  ✅ Unique Match`, `Found single match: ${matchedSKU.sku} → Product: ${matchedSKU.productTitle}`);
-          if (matchedSKU.color) {
-            logProgress(`     🎨 Only Variant`, `${matchedSKU.color} • Price: $${matchedSKU.price} • Stock: ${matchedSKU.inventoryQuantity}`);
-          }
-        }
-
-        skuMatchType = matchedSKU ? 'contains' : 'none';
-
-        // Log when no SKU match is found for contains mode debugging
-        if (!matchedSKU) {
-          logProgress(`  ❌ No Contains Match`, `${fileName} → No matching SKU found in contains mode`);
-          logProgress(`     📝 Debug Info`, `Clean filename: ${fileNameWithoutExt.replace(/[-_\s]/g, '')}`);
-          if (availableSKUs.length > 0) {
-            logProgress(`     📦 Available SKUs`, `${availableSKUs.length} SKUs available for matching`);
-            // Show first few SKUs for debugging
-            const sampleSKUs = availableSKUs.slice(0, 3).map(s => s.sku).join(', ');
-            logProgress(`     🔍 Sample SKUs`, sampleSKUs + (availableSKUs.length > 3 ? '...' : ''));
-          }
         }
       }
+    }
 
-      // Build match details
-      if (matchedSKU) {
-        matchDetails = {
-          sku: matchedSKU.sku,
-          productTitle: matchedSKU.productTitle,
-          color: matchedSKU.color,
-          productId: matchedSKU.productId,
-          variantId: matchedSKU.id,
-          price: matchedSKU.price,
-          inventoryQuantity: matchedSKU.inventoryQuantity
-        };
-      }
+    // Build match details
+    if (matchedSKU) {
+      matchDetails = {
+        sku: matchedSKU.sku,
+        productTitle: matchedSKU.productTitle,
+        color: matchedSKU.color,
+        productId: matchedSKU.productId,
+        variantId: matchedSKU.id,
+        price: matchedSKU.price,
+        inventoryQuantity: matchedSKU.inventoryQuantity,
+        matchType: skuMatchType,
+        baseFileName: matchDetails?.baseFileName || ''
+      };
     }
 
     // Step: Simulate Shopify upload processing with enhanced results
@@ -1171,35 +1096,26 @@ export default function UploadPage() {
     const estimatedUploadTime = Math.round(fileSize / (1024 * 1024) * 2);
     const wouldOverwrite = config.conflictResolution === 'overwrite';
 
-    // Determine success status - SKIP if no SKU match OR no valid image type
+    // For PDFs, we only upload if we have SKU match
     let status = 'success';
     let message = '';
-    let shouldUpload = true;
+    let shouldUpload = false;
 
-    const imageType = detectImageType(fileName);
     const hasValidSKU = !!matchedSKU;
-    const hasValidImageType = !!imageType;
 
-    if (!hasValidSKU || !hasValidImageType) {
-      status = 'skipped';
-
-      if (!hasValidSKU) {
-        message = 'Skipped: No SKU match found';
-      } else {
-        message = 'Skipped: Invalid or missing image type (room/hover required)';
-      }
-
-      shouldUpload = false;
+    if (hasValidSKU) {
+      shouldUpload = true;
+      message = `Would upload spec sheet for ${matchedSKU.productTitle} (${matchedSKU.sku}) - Metafield: custom.spec_sheet_pdf (file_reference)`;
     } else {
-      message = `Would upload and associate with ${matchedSKU.color ? matchedSKU.color + ' variant' : 'variant'}: ${matchedSKU.sku} (${matchedSKU.productTitle})`;
+      shouldUpload = false;
+      status = 'skipped';
+      message = `Skipped: No SKU match found for PDF spec sheet`;
+    }
 
-      // Simulate metafield update
-      message += ` | Metafield Update: ${imageType} image for color "${matchedSKU.color}"`;
-
-      if (matchedSKU.inventoryQuantity === 0) {
-        status = 'warning';
-        message += ` (Warning: SKU is out of stock)`;
-      }
+    // For PDFs, we don't check for out of stock
+    if (matchedSKU && matchedSKU.inventoryQuantity === 0) {
+      status = 'warning';
+      message += ` (Warning: SKU is out of stock)`;
     }
 
     return {
@@ -1213,12 +1129,14 @@ export default function UploadPage() {
       message,
       shouldUpload, // New field to indicate if file should be uploaded
       skuMatch: matchDetails, // Enhanced SKU match details
+      // For PDFs, we update metafield when SKU matches
       metafieldUpdate: shouldUpload && matchedSKU ? {
         productId: matchedSKU.productId,
-        color: matchedSKU.color,
-        imageType: detectImageType(fileName),
-        imageUrl: shouldUpload ? simulatedUrl : null,
-        wouldUpdate: !!detectImageType(fileName)
+        productTitle: matchedSKU.productTitle,
+        sku: matchedSKU.sku,
+        wouldUpdate: true, // PDFs always update metafield when SKU matches
+        metafieldType: 'file_reference',
+        metafieldKey: 'custom.spec_sheet_pdf'
       } : null,
       processingDetails: {
         skuTarget: config.skuTarget,
@@ -1240,7 +1158,7 @@ export default function UploadPage() {
   };
 
   return (
-    <s-page heading="Upload Image">
+    <s-page heading="Upload PDF Spec Sheets">
       <Suspense fallback={
         <s-section heading="Google Drive Connection">
           <s-box padding="base" borderWidth="base" borderRadius="base" background="subdued">
@@ -1580,7 +1498,7 @@ export default function UploadPage() {
                 {uploadResults.metafieldUpdates > 0 && (
                   <s-box padding="base" background="info-subdued" borderRadius="base">
                     <s-paragraph>
-                      <strong>🖼️ Metafields Updated:</strong> {uploadResults.metafieldUpdates}
+                      <strong>📋 Spec Sheet Metafields Updated:</strong> {uploadResults.metafieldUpdates}
                     </s-paragraph>
                   </s-box>
                 )}
@@ -1595,7 +1513,7 @@ export default function UploadPage() {
 
               <s-box padding="base" background="surface" borderRadius="base">
                 <s-paragraph>
-                  Your images have been successfully uploaded to Shopify and linked to the corresponding products!<br />
+                  Your PDF spec sheets have been successfully uploaded to Shopify!<br />
                   <strong>Request ID:</strong> {uploadResults.requestId}<br />
                   <strong>Completed at:</strong> {new Date(uploadResults.timestamp).toLocaleString()}
                 </s-paragraph>

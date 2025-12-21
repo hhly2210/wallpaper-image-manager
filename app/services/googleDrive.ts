@@ -312,3 +312,34 @@ export const getImageFilesCountInFolder = async (folderId: string): Promise<numb
     return 0;
   }
 };
+
+// Get PDF files count in a folder
+export const getPdfFilesCountInFolder = async (folderId: string): Promise<number> => {
+  const accessToken = await googleAuth.getValidAccessToken();
+  if (!accessToken) {
+    throw new Error('Not authenticated with Google Drive');
+  }
+
+  try {
+    const response = await fetch('/api/drive/files/pdf-count', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        accessToken,
+        folderId,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to get PDF files count');
+    }
+
+    const data = await response.json();
+    return data.count || 0;
+  } catch (error) {
+    console.error('Error getting PDF files count:', error);
+    return 0;
+  }
+};

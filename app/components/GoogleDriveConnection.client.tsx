@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { googleAuth, type GoogleTokens } from '../services/googleAuth';
-import { listFoldersWithAuth, getImageFilesCountInFolder, type GoogleFolder } from '../services/googleDrive';
+import { listFoldersWithAuth, getImageFilesCountInFolder, getPdfFilesCountInFolder, type GoogleFolder } from '../services/googleDrive';
 
 interface ApiError {
   error: string;
@@ -18,6 +18,8 @@ export default function GoogleDriveConnection() {
   const [lastError, setLastError] = useState<ApiError | null>(null);
   const [folderImageCount, setFolderImageCount] = useState<number>(0);
   const [isLoadingImageCount, setIsLoadingImageCount] = useState(false);
+  const [folderPdfCount, setFolderPdfCount] = useState<number>(0);
+  const [isLoadingPdfCount, setIsLoadingPdfCount] = useState(false);
 
   useEffect(() => {
     // Check existing connection status on component mount
@@ -29,7 +31,7 @@ export default function GoogleDriveConnection() {
     }
   }, []);
 
-  
+
   const loadFolders = async () => {
     setIsLoadingFolders(true);
     setLastError(null);
@@ -49,7 +51,7 @@ export default function GoogleDriveConnection() {
     }
   };
 
-  
+
   const handleGoogleConnect = () => {
     setIsLoading(true);
 
@@ -108,9 +110,11 @@ export default function GoogleDriveConnection() {
     setSelectedFolder('');
     setLastError(null); // Clear any errors
 
-    // Clear saved folder from localStorage (client-side only)
+    // Clear saved folder from localStorage (client-side only) and reset counts
     try {
       localStorage.removeItem('selectedGoogleDriveFolder');
+      setFolderImageCount(0);
+      setFolderPdfCount(0);
     } catch (error) {
       console.error('Failed to clear selected folder from localStorage:', error);
     }
@@ -134,11 +138,13 @@ export default function GoogleDriveConnection() {
         console.error('Failed to save selected folder to localStorage:', error);
       }
 
-      // Load image count for the selected folder
+      // Load counts for the selected folder
       if (folderId) {
         loadImageCount(folderId);
+        loadPdfCount(folderId);
       } else {
         setFolderImageCount(0);
+        setFolderPdfCount(0);
       }
     }
   };
@@ -155,6 +161,21 @@ export default function GoogleDriveConnection() {
       setFolderImageCount(0);
     } finally {
       setIsLoadingImageCount(false);
+    }
+  };
+
+  // Load PDF count for a folder
+  const loadPdfCount = async (folderId: string) => {
+    setIsLoadingPdfCount(true);
+    try {
+      const count = await getPdfFilesCountInFolder(folderId);
+      setFolderPdfCount(count);
+      console.log(`[UI] Folder ${folderId} contains ${count} PDF files`);
+    } catch (error) {
+      console.error('[UI] Failed to load PDF count:', error);
+      setFolderPdfCount(0);
+    } finally {
+      setIsLoadingPdfCount(false);
     }
   };
 
@@ -265,10 +286,10 @@ export default function GoogleDriveConnection() {
     <s-section heading="Google Drive Integration">
       <s-box padding="base" borderWidth="base" borderRadius="base" background="subdued">
         <s-stack direction="block" gap="base">
-          <s-stack direction="inline" alignment="center" gap="base">
+          {/* <s-stack direction="inline" alignment="center" gap="base">
             <s-icon source="https://www.gstatic.com/images/icons/material/system/1x/drive_cloud_24dp.png" />
             <s-heading level="3">Google Drive Integration</s-heading>
-          </s-stack>
+          </s-stack> */}
 
           {!isConnected ? (
             <>
@@ -376,29 +397,60 @@ export default function GoogleDriveConnection() {
                         <s-paragraph style={{ fontSize: '13px' }}>
                           📁 <strong>Folder Information:</strong>
                         </s-paragraph>
-                        <s-stack direction="inline" gap="base" alignment="center">
-                          {isLoadingImageCount ? (
-                            <s-paragraph style={{ fontSize: '13px' }}>
-                              🔍 Counting images...
-                            </s-paragraph>
-                          ) : (
-                            <>
+                        <s-stack direction="block" gap="small">
+                          {/* Image Files Count */}
+                          <s-stack direction="inline" gap="base" alignment="center">
+                            {isLoadingImageCount ? (
                               <s-paragraph style={{ fontSize: '13px' }}>
-                                🖼️ <strong>{folderImageCount}</strong> image files
+                                🔍 Counting images...
                               </s-paragraph>
-                              {folderImageCount > 0 && (
-                                <s-badge status="success">Ready to upload</s-badge>
-                              )}
-                              {folderImageCount === 0 && (
-                                <s-badge status="warning">No images found</s-badge>
-                              )}
-                            </>
+                            ) : (
+                              <>
+                                <s-paragraph style={{ fontSize: '13px' }}>
+                                  🖼️ <strong>{folderImageCount}</strong> image files
+                                </s-paragraph>
+                                {folderImageCount > 0 && (
+                                  <s-badge status="success">Ready to upload</s-badge>
+                                )}
+                                {folderImageCount === 0 && (
+                                  <s-badge status="warning">No images found</s-badge>
+                                )}
+                              </>
+                            )}
+                          </s-stack>
+
+                          {/* PDF Files Count */}
+                          <s-stack direction="inline" gap="base" alignment="center">
+                            {isLoadingPdfCount ? (
+                              <s-paragraph style={{ fontSize: '13px' }}>
+                                🔍 Counting PDF files...
+                              </s-paragraph>
+                            ) : (
+                              <>
+                                <s-paragraph style={{ fontSize: '13px' }}>
+                                  📄 <strong>{folderPdfCount}</strong> PDF files
+                                </s-paragraph>
+                                {folderPdfCount > 0 && (
+                                  <s-badge status="info">PDF spec sheets ready</s-badge>
+                                )}
+                                {folderPdfCount === 0 && (
+                                  <s-badge status="warning">No PDF files found</s-badge>
+                                )}
+                              </>
+                            )}
+                          </s-stack>
+
+                          {/* Total Files Summary */}
+                          {(!isLoadingImageCount && !isLoadingPdfCount) && (
+                            <s-paragraph style={{ fontSize: '13px', fontStyle: 'italic' }}>
+                              💾 <strong>{folderImageCount + folderPdfCount}</strong> total files ({folderImageCount} images + {folderPdfCount} PDFs)
+                            </s-paragraph>
                           )}
                         </s-stack>
-                                              </s-stack>
+                      </s-stack>
                     </s-box>
 
-                                      </s-stack>
+                  </s-stack>
                 </s-box>
               )}
 

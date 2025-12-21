@@ -19,7 +19,8 @@ export default function App() {
     <AppProvider embedded apiKey={apiKey}>
       <s-app-nav>
         <s-link href="/app">Dashboard</s-link>
-        <s-link href="/app/upload">Upload</s-link>
+        <s-link href="/app/upload">Upload Image</s-link>
+        <s-link href="/app/upload-pdf">Upload PDF</s-link>
         <s-link href="/app/settings">Settings</s-link>
       </s-app-nav>
       <Outlet />
