@@ -279,6 +279,10 @@ async function handleFolderUpload(
     let processedCount = 0;
     let metafieldUpdates = 0;
 
+    // Track processed image types by product and color to avoid duplicate processing
+    // Format: Map of "productId-colorCode" -> Set of uploaded types ("room", "hover")
+    const processedImageTypes = new Map<string, Set<string>>();
+
     for (const file of files) {
       try {
         console.log(
@@ -366,6 +370,42 @@ async function handleFolderUpload(
 
             processedCount++;
             continue; // Skip to next file
+          }
+
+          // Check if we've already processed this specific image type for this color and product
+          if (skuMatch && skuMatch.productId && imageType) {
+            const colorCode = getColorCodeFromSKU(skuMatch.sku);
+            const colorKey = `${skuMatch.productId}-${colorCode}`;
+            const uploadedTypes = processedImageTypes.get(colorKey);
+
+            if (uploadedTypes && uploadedTypes.has(imageType)) {
+              console.log(
+                `[${requestId}] Skipping file - ${imageType} image for color ${colorCode} already processed for product ${skuMatch.productTitle}: ${fileData.name}`,
+              );
+
+              // Add to results as skipped
+              uploadResults.push({
+                googleFileId: fileData.id,
+                fileName: fileData.name,
+                fileSize: fileData.size,
+                mimeType: fileData.mimeType,
+                status: "skipped",
+                shopifyFileId: null,
+                shopifyUrl: null,
+                skuMatch: {
+                  productId: skuMatch.productId,
+                  productTitle: skuMatch.productTitle,
+                  sku: skuMatch.sku,
+                  color: skuMatch.color,
+                },
+                imageType,
+                reason: `${imageType} image for color ${skuMatch.color} (${colorCode}) already processed for this product`,
+                uploadedAt: new Date().toISOString(),
+              });
+
+              processedCount++;
+              continue; // Skip to next file
+            }
           }
         } else {
           // No SKU filtering configured - detect image type for potential future use
@@ -706,6 +746,21 @@ async function handleFolderUpload(
 
             if (metafieldUpdateResult) {
               metafieldUpdates++;
+
+              // Mark this specific image type as processed for this color and product
+              const colorCode = getColorCodeFromSKU(skuMatch.sku);
+              const colorKey = `${skuMatch.productId}-${colorCode}`;
+
+              if (!processedImageTypes.has(colorKey)) {
+                processedImageTypes.set(colorKey, new Set<string>());
+              }
+
+              const uploadedTypes = processedImageTypes.get(colorKey)!;
+              uploadedTypes.add(imageType);
+
+              console.log(
+                `[${requestId}] Marked ${imageType} image for color ${colorCode} as processed for product ${skuMatch.productTitle}. Total uploaded types for this color: ${Array.from(uploadedTypes).join(", ")}`,
+              );
             }
           } catch (metafieldError) {
             console.error(
@@ -1159,6 +1214,30 @@ async function handleFileIdsUpload(
   }
 }
 
+// Helper function to extract SKU base (cut at 3rd dash)
+// Input: "WP-SCALLOPS-SKY-2748" -> Output: "WP-SCALLOPS-SKY"
+function extractSKUBase(sku: string): string {
+  if (!sku) return "";
+
+  const parts = sku.split("-");
+  if (parts.length < 4) return sku; // Return original if less than 4 parts
+
+  // Join first 3 parts (WP, SCALLOPS, SKY) and ignore the rest (size codes)
+  return parts.slice(0, 3).join("-");
+}
+
+// Helper function to extract 3-char color code from SKU
+// Input: "WP-SCALLOPS-SKY-2748" -> Output: "SKY"
+function getColorCodeFromSKU(sku: string): string {
+  if (!sku) return "";
+
+  const parts = sku.split("-");
+  if (parts.length < 3) return "";
+
+  // The 3rd part is the color code (index 2)
+  return parts[2].toUpperCase();
+}
+
 // Helper function to match file with SKU
 function matchFileWithSKU(
   fileName: string,
@@ -1174,29 +1253,39 @@ function matchFileWithSKU(
   const fileNameClean = fileNameWithoutExt.replace(/[-_\s]/g, "");
 
   if (skuTarget === "exact-sku") {
-    // Exact match with SKU - check if filename starts with SKU
+    // Exact match with SKU - check if filename starts with SKU base
     return availableSKUs.find((sku) => {
       if (!sku || !sku.sku) return false;
-      const skuClean = sku.sku.toLowerCase().replace(/[-_\s]/g, "");
+
+      // Extract SKU base (without size code)
+      const skuBase = extractSKUBase(sku.sku);
+      const skuBaseClean = skuBase.toLowerCase().replace(/[-_\s]/g, "");
+
       const isPrefixMatch =
-        fileNameClean.startsWith(skuClean) ||
-        fileNameWithoutExt.toLowerCase().startsWith(sku.sku.toLowerCase());
+        fileNameClean.startsWith(skuBaseClean) ||
+        fileNameWithoutExt.toLowerCase().startsWith(skuBase.toLowerCase());
       const isExactMatch =
-        skuClean === fileNameClean ||
-        sku.sku.toLowerCase() === fileNameWithoutExt;
+        skuBaseClean === fileNameClean ||
+        skuBase.toLowerCase() === fileNameWithoutExt;
+
       return isPrefixMatch || isExactMatch;
     });
   } else if (skuTarget === "contains-sku") {
-    // Enhanced contains match with SKU
+    // Enhanced contains match with SKU base
     const potentialMatches = availableSKUs.filter((sku) => {
       if (!sku || !sku.sku) return false;
-      const skuClean = sku.sku.toLowerCase().replace(/[-_\s]/g, "");
+
+      // Extract SKU base (without size code)
+      const skuBase = extractSKUBase(sku.sku);
+      const skuBaseClean = skuBase.toLowerCase().replace(/[-_\s]/g, "");
+
       const isPrefixMatch =
-        fileNameClean.startsWith(skuClean) ||
-        fileNameWithoutExt.toLowerCase().startsWith(sku.sku.toLowerCase());
+        fileNameClean.startsWith(skuBaseClean) ||
+        fileNameWithoutExt.toLowerCase().startsWith(skuBase.toLowerCase());
       const isContainsMatch =
-        fileNameWithoutExt.includes(sku.sku.toLowerCase()) ||
-        fileNameClean.includes(skuClean);
+        fileNameWithoutExt.includes(skuBase.toLowerCase()) ||
+        fileNameClean.includes(skuBaseClean);
+
       return isPrefixMatch || isContainsMatch;
     });
 
@@ -1218,19 +1307,23 @@ function matchFileWithSKU(
             isPrefixMatch: false,
             isExactMatch: false,
           };
-        const skuClean = sku.sku.toLowerCase().replace(/[-_\s]/g, "");
+
+        // Extract SKU base (without size code)
+        const skuBase = extractSKUBase(sku.sku);
+        const skuBaseClean = skuBase.toLowerCase().replace(/[-_\s]/g, "");
+
         const isPrefixMatch =
-          fileNameClean.startsWith(skuClean) ||
-          fileNameWithoutExt.toLowerCase().startsWith(sku.sku.toLowerCase());
-        const isExactMatch = fileNameClean === skuClean;
+          fileNameClean.startsWith(skuBaseClean) ||
+          fileNameWithoutExt.toLowerCase().startsWith(skuBase.toLowerCase());
+        const isExactMatch = fileNameClean === skuBaseClean;
 
         let score = 0;
         if (isPrefixMatch) {
-          score = (fileNameClean.length + skuClean.length) * 3;
+          score = (fileNameClean.length + skuBaseClean.length) * 3;
         } else if (isExactMatch) {
-          score = (fileNameClean.length + skuClean.length) * 2;
+          score = (fileNameClean.length + skuBaseClean.length) * 2;
         } else {
-          score = fileNameClean.length + skuClean.length;
+          score = fileNameClean.length + skuBaseClean.length;
         }
 
         return { sku, score, isPrefixMatch, isExactMatch };

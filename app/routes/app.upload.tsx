@@ -925,6 +925,16 @@ export default function UploadPage() {
     }
   };
 
+  // Helper function to extract SKU base (cut at 3rd dash)
+  // Must match server-side logic in api.upload.shopify.ts
+  const extractSKUBase = (sku: string): string => {
+    if (!sku) return "";
+    const parts = sku.split("-");
+    if (parts.length < 4) return sku; // Return original if less than 4 parts
+    // Join first 3 parts (WP, SCALLOPS, SKY) and ignore the rest (size codes)
+    return parts.slice(0, 3).join("-");
+  };
+
   // Simulate individual file processing with enhanced SKU matching
   const simulateFileProcessing = async (file: any, config: UploadFormData, availableSKUs: any[] = []) => {
     const fileName = file.name || '';
@@ -978,20 +988,20 @@ export default function UploadPage() {
       const fileNameClean = fileNameWithoutExt.replace(/[-_\s]/g, ''); // Remove separators
 
       if (config.skuTarget === 'exact-sku') {
-        // Exact match with SKU - check if filename starts with SKU (handles WP-BANK-SKY-2424-ROOM format)
+        // Exact match with SKU base - check if filename starts with SKU base (handles WP-SCALLOPS-SKY-HOVER format)
         matchedSKU = availableSKUs.find(sku => {
-          const skuClean = sku.sku.toLowerCase().replace(/[-_\s]/g, '');
-          const fileNameClean = fileNameWithoutExt.replace(/[-_\s]/g, '');
+          // Extract SKU base (without size code)
+          const skuBase = extractSKUBase(sku.sku);
+          const skuBaseClean = skuBase.toLowerCase().replace(/[-_\s]/g, '');
 
-          // Check if filename starts with SKU (prefix match)
-          // This handles cases like: WP-BANK-SKY-2424-ROOM matches WP-BANK-SKY-2424
-          const isPrefixMatch = fileNameClean.startsWith(skuClean) ||
-            fileNameWithoutExt.toLowerCase().startsWith(sku.sku.toLowerCase());
+          // Check if filename starts with SKU base (prefix match)
+          // This handles cases like: WP-SCALLOPS-SKY-HOVER matches WP-SCALLOPS-SKY-2424
+          const isPrefixMatch = fileNameClean.startsWith(skuBaseClean) ||
+            fileNameWithoutExt.toLowerCase().startsWith(skuBase.toLowerCase());
 
           // Keep existing exact matches as fallback
-          const isExactMatch = skuClean === fileNameClean ||
-            sku.sku.toLowerCase() === fileNameWithoutExt ||
-            fileNameWithoutExt.includes(sku.sku.toLowerCase());
+          const isExactMatch = skuBaseClean === fileNameClean ||
+            skuBase.toLowerCase() === fileNameWithoutExt;
 
           return isPrefixMatch || isExactMatch;
         });
@@ -1000,77 +1010,81 @@ export default function UploadPage() {
 
         // Add detailed logging for exact matches
         if (matchedSKU) {
-          const skuClean = matchedSKU.sku.toLowerCase().replace(/[-_\s]/g, '');
-          const fileNameClean = fileNameWithoutExt.replace(/[-_\s]/g, '');
+          const skuBase = extractSKUBase(matchedSKU.sku);
+          const skuBaseClean = skuBase.toLowerCase().replace(/[-_\s]/g, '');
 
-          const isPrefixMatch = fileNameClean.startsWith(skuClean) ||
-            fileNameWithoutExt.toLowerCase().startsWith(matchedSKU.sku.toLowerCase());
-          const isExactMatch = skuClean === fileNameClean ||
-            matchedSKU.sku.toLowerCase() === fileNameWithoutExt;
+          const isPrefixMatch = fileNameClean.startsWith(skuBaseClean) ||
+            fileNameWithoutExt.toLowerCase().startsWith(skuBase.toLowerCase());
+          const isExactMatch = skuBaseClean === fileNameClean ||
+            skuBase.toLowerCase() === fileNameWithoutExt;
 
           const matchType = isPrefixMatch ? 'PREFIX' :
             isExactMatch ? 'EXACT' : 'CONTAINS';
 
-          logProgress(`  ✅ Exact Match`, `${fileName} → SKU: ${matchedSKU.sku} (${matchType}) → Product: ${matchedSKU.productTitle}`);
+          logProgress(`  ✅ Exact Match`, `${fileName} → SKU Base: ${skuBase} (from ${matchedSKU.sku}) (${matchType}) → Product: ${matchedSKU.productTitle}`);
           if (matchedSKU.color) {
             logProgress(`     🎨 Variant Details`, `Color: ${matchedSKU.color} • Price: $${matchedSKU.price} • Stock: ${matchedSKU.inventoryQuantity}`);
           }
         } else {
           // Log when no SKU match is found for debugging
           logProgress(`  ❌ No Match`, `${fileName} → No matching SKU found`);
-          logProgress(`     📝 Debug Info`, `Clean filename: ${fileNameWithoutExt.replace(/[-_\s]/g, '')}`);
+          logProgress(`     📝 Debug Info`, `Clean filename: ${fileNameClean}`);
           if (availableSKUs.length > 0) {
             logProgress(`     📦 Available SKUs`, `${availableSKUs.length} SKUs available for matching`);
             // Show first few SKUs for debugging
-            const sampleSKUs = availableSKUs.slice(0, 3).map(s => s.sku).join(', ');
+            const sampleSKUs = availableSKUs.slice(0, 3).map(s => {
+              const skuBase = extractSKUBase(s.sku);
+              return `${s.sku} → ${skuBase}`;
+            }).join(', ');
             logProgress(`     🔍 Sample SKUs`, sampleSKUs + (availableSKUs.length > 3 ? '...' : ''));
           }
         }
 
       } else if (config.skuTarget === 'contains-sku') {
-        // Enhanced contains match with SKU and color - improved logic for WP-BANK-SKY-2424-XXX format
+        // Enhanced contains match with SKU base - improved logic for WP-SCALLOPS-SKY-XXX format
         const potentialMatches = availableSKUs.filter(sku => {
-          const skuClean = sku.sku.toLowerCase().replace(/[-_\s]/g, '');
+          // Extract SKU base (without size code)
+          const skuBase = extractSKUBase(sku.sku);
+          const skuBaseClean = skuBase.toLowerCase().replace(/[-_\s]/g, '');
 
-          // Priority 1: Prefix match - filename starts with SKU (WP-BANK-SKY-2424-ROOM starts with WP-BANK-SKY-2424)
-          const isPrefixMatch = fileNameClean.startsWith(skuClean) ||
-            fileNameWithoutExt.toLowerCase().startsWith(sku.sku.toLowerCase());
+          // Priority 1: Prefix match - filename starts with SKU base (WP-SCALLOPS-SKY-HOVER starts with WP-SCALLOPS-SKY)
+          const isPrefixMatch = fileNameClean.startsWith(skuBaseClean) ||
+            fileNameWithoutExt.toLowerCase().startsWith(skuBase.toLowerCase());
 
-          // Priority 2: Contains match - filename contains SKU somewhere
-          const isContainsMatch = fileNameWithoutExt.includes(sku.sku.toLowerCase()) ||
-            fileNameClean.includes(skuClean) ||
-            sku.sku.toLowerCase().includes(fileNameWithoutExt) ||
-            skuClean.includes(fileNameClean);
+          // Priority 2: Contains match - filename contains SKU base somewhere
+          const isContainsMatch = fileNameWithoutExt.includes(skuBase.toLowerCase()) ||
+            fileNameClean.includes(skuBaseClean);
 
           return isPrefixMatch || isContainsMatch;
         });
 
         // Smart matching strategy for multiple potential matches
         if (potentialMatches.length > 1) {
-          // Strategy 1: Most specific match (prioritize prefix matches)
+          // Strategy 1: Most specific match (prioritize prefix matches with SKU base)
           const specificMatches = potentialMatches.map(sku => {
-            const skuClean = sku.sku.toLowerCase().replace(/[-_\s]/g, '');
-            const fileNameClean = fileNameWithoutExt.replace(/[-_\s]/g, '');
+            // Extract SKU base (without size code)
+            const skuBase = extractSKUBase(sku.sku);
+            const skuBaseClean = skuBase.toLowerCase().replace(/[-_\s]/g, '');
 
             // Check if it's a prefix match (highest priority)
-            const isPrefixMatch = fileNameClean.startsWith(skuClean) ||
-              fileNameWithoutExt.toLowerCase().startsWith(sku.sku.toLowerCase());
+            const isPrefixMatch = fileNameClean.startsWith(skuBaseClean) ||
+              fileNameWithoutExt.toLowerCase().startsWith(skuBase.toLowerCase());
 
             // Check if it's an exact match (medium priority)
-            const isExactMatch = fileNameClean === skuClean;
+            const isExactMatch = fileNameClean === skuBaseClean;
 
             // Check if it's a contains match (lowest priority)
-            const isContainsMatch = fileNameClean.includes(skuClean) ||
-              fileNameWithoutExt.includes(sku.sku.toLowerCase());
+            const isContainsMatch = fileNameClean.includes(skuBaseClean) ||
+              fileNameWithoutExt.includes(skuBase.toLowerCase());
 
             // Calculate score with priority weighting
             let score = 0;
             if (isPrefixMatch) {
-              score = (fileNameClean.length + skuClean.length) * 3; // Highest weight
+              score = (fileNameClean.length + skuBaseClean.length) * 3; // Highest weight
             } else if (isExactMatch) {
-              score = (fileNameClean.length + skuClean.length) * 2; // Medium weight
+              score = (fileNameClean.length + skuBaseClean.length) * 2; // Medium weight
             } else if (isContainsMatch) {
-              score = fileNameClean.length + skuClean.length; // Lowest weight
+              score = fileNameClean.length + skuBaseClean.length; // Lowest weight
             }
 
             return {
@@ -1093,7 +1107,7 @@ export default function UploadPage() {
           if (fileNameTokens.length > 1) {
             for (const token of fileNameTokens) {
               const optionMatch = potentialMatches.find(sku => {
-                if (!sku.options?.selectedOptions) return false;
+                if (!sku.selectedOptions) return false;
                 return sku.options.selectedOptions.some((opt: any) =>
                   opt.value.toLowerCase().includes(token.toLowerCase()) ||
                   token.toLowerCase().includes(opt.value.toLowerCase())
@@ -1115,16 +1129,19 @@ export default function UploadPage() {
               matchInfo?.isExactMatch ? 'EXACT' :
                 matchInfo?.isContainsMatch ? 'CONTAINS' : 'UNKNOWN';
 
-            logProgress(`  🎯 Smart Match`, `Selected SKU: ${bestMatch.sku} → Product: ${bestMatch.productTitle} (${matchType})`);
+            const skuBase = extractSKUBase(bestMatch.sku);
+            logProgress(`  🎯 Smart Match`, `Selected SKU Base: ${skuBase} (from ${bestMatch.sku}) → Product: ${bestMatch.productTitle} (${matchType})`);
             if (bestMatch.color) {
               logProgress(`     🎨 Color Variant`, `${bestMatch.color} • Price: $${bestMatch.price} • Stock: ${bestMatch.inventoryQuantity}`);
             }
           } else {
-            logProgress(`  🎲 Fallback Match`, `Using: ${matchedSKU.sku} → Product: ${matchedSKU.productTitle}`);
+            const skuBase = extractSKUBase(matchedSKU.sku);
+            logProgress(`  🎲 Fallback Match`, `Using SKU Base: ${skuBase} (from ${matchedSKU.sku}) → Product: ${matchedSKU.productTitle}`);
           }
         } else if (potentialMatches.length === 1) {
           matchedSKU = potentialMatches[0];
-          logProgress(`  ✅ Unique Match`, `Found single match: ${matchedSKU.sku} → Product: ${matchedSKU.productTitle}`);
+          const skuBase = extractSKUBase(matchedSKU.sku);
+          logProgress(`  ✅ Unique Match`, `Found single match: SKU Base: ${skuBase} (from ${matchedSKU.sku}) → Product: ${matchedSKU.productTitle}`);
           if (matchedSKU.color) {
             logProgress(`     🎨 Only Variant`, `${matchedSKU.color} • Price: $${matchedSKU.price} • Stock: ${matchedSKU.inventoryQuantity}`);
           }
@@ -1135,11 +1152,14 @@ export default function UploadPage() {
         // Log when no SKU match is found for contains mode debugging
         if (!matchedSKU) {
           logProgress(`  ❌ No Contains Match`, `${fileName} → No matching SKU found in contains mode`);
-          logProgress(`     📝 Debug Info`, `Clean filename: ${fileNameWithoutExt.replace(/[-_\s]/g, '')}`);
+          logProgress(`     📝 Debug Info`, `Clean filename: ${fileNameClean}`);
           if (availableSKUs.length > 0) {
             logProgress(`     📦 Available SKUs`, `${availableSKUs.length} SKUs available for matching`);
             // Show first few SKUs for debugging
-            const sampleSKUs = availableSKUs.slice(0, 3).map(s => s.sku).join(', ');
+            const sampleSKUs = availableSKUs.slice(0, 3).map(s => {
+              const skuBase = extractSKUBase(s.sku);
+              return `${s.sku} → ${skuBase}`;
+            }).join(', ');
             logProgress(`     🔍 Sample SKUs`, sampleSKUs + (availableSKUs.length > 3 ? '...' : ''));
           }
         }
