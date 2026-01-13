@@ -935,6 +935,31 @@ export default function UploadPage() {
     return parts.slice(0, 3).join("-");
   };
 
+  // Helper function to validate color code in filename
+  // Color code must be exactly 3 characters (3rd part after splitting by "-")
+  const validateColorCode = (fileName: string): { valid: boolean; colorCode: string; reason?: string } => {
+    if (!fileName) return { valid: false, colorCode: "", reason: "No filename provided" };
+
+    const fileNameWithoutExt = fileName.replace(/\.[^/.]+$/, "");
+    const parts = fileNameWithoutExt.split("-");
+
+    if (parts.length < 3) {
+      return { valid: false, colorCode: "", reason: "Filename does not have enough parts" };
+    }
+
+    const colorCode = parts[2]; // 3rd part is the color code (index 2)
+
+    if (colorCode.length !== 3) {
+      return {
+        valid: false,
+        colorCode,
+        reason: `Color code "${colorCode}" has ${colorCode.length} characters (must be exactly 3)`
+      };
+    }
+
+    return { valid: true, colorCode };
+  };
+
   // Simulate individual file processing with enhanced SKU matching
   const simulateFileProcessing = async (file: any, config: UploadFormData, availableSKUs: any[] = []) => {
     const fileName = file.name || '';
@@ -977,6 +1002,23 @@ export default function UploadPage() {
         message: 'Invalid file name'
       };
     }
+
+    // Step: Validate color code in filename (must be exactly 3 characters)
+    const colorCodeValidation = validateColorCode(fileName);
+    if (!colorCodeValidation.valid) {
+      logProgress(`  ❌ Invalid Color Code`, `${fileName} → ${colorCodeValidation.reason}`);
+      return {
+        googleFileId: file.id,
+        fileName,
+        fileSize,
+        mimeType,
+        status: 'skipped',
+        message: colorCodeValidation.reason || 'Invalid color code format',
+        colorCodeValidation
+      };
+    }
+
+    logProgress(`  ✅ Color Code Valid`, `File: ${fileName} → Color code: ${colorCodeValidation.colorCode} (3 characters)`);
 
     // Step: Enhanced SKU matching logic
     let matchedSKU = null;

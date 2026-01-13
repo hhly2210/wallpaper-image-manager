@@ -310,6 +310,38 @@ async function handleFolderUpload(
           throw new Error("Invalid file data or missing file name");
         }
 
+        // Validate color code in filename (must be exactly 3 characters)
+        const colorCodeValidation = validateColorCode(fileData.name);
+        if (!colorCodeValidation.valid) {
+          console.log(
+            `[${requestId}] Skipping file - invalid color code: ${fileData.name}`,
+            { reason: colorCodeValidation.reason },
+          );
+
+          // Add to results as skipped
+          uploadResults.push({
+            googleFileId: fileData.id,
+            fileName: fileData.name,
+            fileSize: fileData.size,
+            mimeType: fileData.mimeType,
+            status: "skipped",
+            shopifyFileId: null,
+            shopifyUrl: null,
+            skuMatch: null,
+            imageType: null,
+            reason: colorCodeValidation.reason || 'Invalid color code format',
+            uploadedAt: new Date().toISOString(),
+          });
+
+          processedCount++;
+          continue; // Skip to next file
+        }
+
+        console.log(
+          `[${requestId}] Color code validation passed: ${fileData.name}`,
+          { colorCode: colorCodeValidation.colorCode },
+        );
+
         // Match file with SKU if configured (VALIDATE BEFORE UPLOAD)
         let skuMatch = null;
         let imageType = null;
@@ -1236,6 +1268,31 @@ function getColorCodeFromSKU(sku: string): string {
 
   // The 3rd part is the color code (index 2)
   return parts[2].toUpperCase();
+}
+
+// Helper function to validate color code in filename
+// Color code must be exactly 3 characters (3rd part after splitting by "-")
+function validateColorCode(fileName: string): { valid: boolean; colorCode: string; reason?: string } {
+  if (!fileName) return { valid: false, colorCode: "", reason: "No filename provided" };
+
+  const fileNameWithoutExt = fileName.replace(/\.[^/.]+$/, "");
+  const parts = fileNameWithoutExt.split("-");
+
+  if (parts.length < 3) {
+    return { valid: false, colorCode: "", reason: "Filename does not have enough parts" };
+  }
+
+  const colorCode = parts[2]; // 3rd part is the color code (index 2)
+
+  if (colorCode.length !== 3) {
+    return {
+      valid: false,
+      colorCode,
+      reason: `Color code "${colorCode}" has ${colorCode.length} characters (must be exactly 3)`
+    };
+  }
+
+  return { valid: true, colorCode };
 }
 
 // Helper function to match file with SKU
