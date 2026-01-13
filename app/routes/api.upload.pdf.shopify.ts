@@ -1,5 +1,12 @@
 import { google } from "googleapis";
 import { authenticate } from "../shopify.server";
+import {
+  fetchSKUDataFromShopify,
+  matchPDFFileWithSKU,
+  getColorCodeFromSKU,
+  validatePDFColorCode,
+  extractSKUBase,
+} from "../utils/skuUtils";
 
 export async function action({ request }: { request: Request }) {
   console.log(`[SERVER] Shopify PDF upload API called`, {
@@ -197,76 +204,23 @@ async function handleFolderUpload(
       );
     }
 
-    // Fetch SKU data for matching
+    // Fetch SKU data for matching using shared utility
     console.log(`[${requestId}] Fetching SKU data for product matching...`);
-    let availableSKUs = [];
+    let availableSKUs: any[] = [];
 
     if (config.skuTarget) {
       try {
-        // Import SKU handling directly to avoid fetch issues
-        const { authenticate } = await import("../shopify.server");
-        const { admin } = await authenticate.admin(request);
+        // Use shared utility to fetch SKU data with consistent filtering
+        const skuResult = await fetchSKUDataFromShopify(admin, 250);
 
-        const skuQuery = `
-          query getProducts($first: Int!) {
-            products(first: $first, query: "product_type:Wallpaper") {
-              edges {
-                node {
-                  id
-                  title
-                  handle
-                  productType
-                  tags
-                  variants(first: 50) {
-                    edges {
-                      node {
-                        id
-                        sku
-                        title
-                        price
-                        inventoryQuantity
-                        selectedOptions {
-                          name
-                          value
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        `;
+        if (skuResult.success && skuResult.flattenedSKUs) {
+          availableSKUs = skuResult.flattenedSKUs;
 
-        const skuResponse = await admin.graphql(skuQuery, {
-          variables: { first: 50 },
-        });
-
-        const skuData = await skuResponse.json();
-
-        if (skuData?.data?.products?.edges) {
-          availableSKUs = skuData.data.products.edges.flatMap(
-            (productEdge: any) => {
-              const product = productEdge.node;
-              return product.variants.edges.map((variantEdge: any) => {
-                const variant = variantEdge.node;
-                const colorOption = variant.selectedOptions.find(
-                  (opt: any) => opt.name.toLowerCase() === "color",
-                );
-                return {
-                  ...variant,
-                  productId: product.id,
-                  productHandle: product.handle,
-                  productTitle: product.title,
-                  productType: product.productType,
-                  productTags: product.tags,
-                  color: colorOption?.value || null,
-                };
-              });
-            },
+          console.log(
+            `[${requestId}] Loaded ${availableSKUs.length} SKUs from ${skuResult.summary.totalProducts} Wallpaper products`,
           );
           console.log(
-            `[${requestId}] Loaded ${availableSKUs.length} SKUs for matching`,
+            `[${requestId}] SKU Summary: ${skuResult.summary.productsWithSKUs} products with SKUs, ${skuResult.summary.totalVariants} total variants (only variants with Color option)`,
           );
         }
       } catch (error) {
@@ -279,8 +233,9 @@ async function handleFolderUpload(
     let processedCount = 0;
     let metafieldUpdates = 0;
 
-    // Track products that already have spec sheets uploaded
-    const processedProductIds = new Set<string>();
+    // Track processed colors by product to avoid duplicate processing
+    // Format: Set of "productId-colorCode" strings
+    const processedColorPdfs = new Set<string>();
 
     for (const file of files) {
       try {
@@ -346,7 +301,7 @@ async function handleFolderUpload(
             },
           );
 
-          skuMatch = matchFileWithSKU(
+          skuMatch = matchPDFFileWithSKU(
             fileData.name,
             availableSKUs,
             config.skuTarget,
@@ -358,7 +313,6 @@ async function handleFolderUpload(
                   sku: skuMatch.sku,
                   productTitle: skuMatch.productTitle,
                   productId: skuMatch.productId,
-                  matchType: skuMatch.matchType
                 }
               : null,
           });
@@ -366,25 +320,30 @@ async function handleFolderUpload(
           // For PDF upload, we REQUIRE SKU match
           shouldUploadFile = !!skuMatch;
 
-          // Check if this product already has a spec sheet uploaded
-          if (skuMatch && processedProductIds.has(skuMatch.productId)) {
-            console.log(
-              `[${requestId}] Product ${skuMatch.productId} already processed, skipping PDF: ${fileData.name}`,
-            );
-            shouldUploadFile = false;
-            skuMatch = null; // Clear match to mark as skipped
+          // Check if this color for this product already has a spec sheet uploaded
+          if (skuMatch) {
+            const colorCode = getColorCodeFromSKU(skuMatch.sku);
+            const colorKey = `${skuMatch.productId}-${colorCode}`;
+
+            if (processedColorPdfs.has(colorKey)) {
+              console.log(
+                `[${requestId}] Color ${colorCode} for product ${skuMatch.productId} already processed, skipping PDF: ${fileData.name}`,
+              );
+              shouldUploadFile = false;
+              skuMatch = null; // Clear match to mark as skipped
+            }
           }
 
           if (!skuMatch) {
             console.log(
-              `[${requestId}] No SKU match found for PDF file or product already processed: ${fileData.name}`,
+              `[${requestId}] No SKU match found for PDF file or color already processed: ${fileData.name}`,
             );
           }
         }
 
         if (!shouldUploadFile) {
           console.log(
-            `[${requestId}] Skipping PDF file (no SKU match or product already processed): ${fileData.name}`,
+            `[${requestId}] Skipping PDF file (no SKU match or color already processed): ${fileData.name}`,
           );
 
           uploadResults.push({
@@ -400,11 +359,12 @@ async function handleFolderUpload(
                   productId: skuMatch.productId,
                   productTitle: skuMatch.productTitle,
                   sku: skuMatch.sku,
+                  color: skuMatch.color,
                   matchType: skuMatch.matchType
                 }
               : null,
             reason: skuMatch
-              ? `Product already processed (${skuMatch.productTitle})`
+              ? `Color ${skuMatch.color} already processed for product ${skuMatch.productTitle}`
               : "No SKU match found for PDF",
             uploadedAt: new Date().toISOString(),
           });
@@ -648,24 +608,30 @@ async function handleFolderUpload(
         // Update spec sheet metafield if we have a SKU match
         if (skuMatch) {
           console.log(
-            `[${requestId}] Updating spec sheet metafield for product ${skuMatch.productId}`,
+            `[${requestId}] Updating spec sheet metafield for product ${skuMatch.productId}, color: ${skuMatch.color}`,
           );
 
           try {
+            const colorCode = getColorCodeFromSKU(skuMatch.sku);
             const metafieldUpdateResult = await updateProductSpecSheetMetafield(
               admin,
               skuMatch.productId,
               fileGid, // Use GID for file_reference
+              colorCode, // Pass color code
+              skuMatch.color || "", // Pass full color name
               file.name,
               requestId,
             );
 
             if (metafieldUpdateResult) {
               metafieldUpdates++;
-              // Mark this product as processed
-              processedProductIds.add(skuMatch.productId);
+
+              // Mark this color as processed for this product
+              const colorKey = `${skuMatch.productId}-${colorCode}`;
+              processedColorPdfs.add(colorKey);
+
               console.log(
-                `[${requestId}] Product ${skuMatch.productId} marked as processed to avoid duplicate uploads`,
+                `[${requestId}] Color ${colorCode} for product ${skuMatch.productId} marked as processed to avoid duplicate uploads`,
               );
             }
           } catch (metafieldError) {
@@ -1079,114 +1045,97 @@ async function handleFileIdsUpload(
   }
 }
 
-// Helper function to match PDF file with product SKU (partial match)
-function matchFileWithSKU(
-  fileName: string,
-  availableSKUs: any[],
-  skuTarget: string,
-): any {
-  // Add null/undefined checks
-  if (!fileName || !availableSKUs || availableSKUs.length === 0) {
-    return null;
-  }
+// Note: Helper functions (extractSKUBase, getColorCodeFromSKU, validatePDFColorCode, matchFileWithSKU)
+// have been moved to app/utils/skuUtils.ts for reusability between Dry Upload and Start Upload
 
-  const fileNameWithoutExt = fileName.replace(/\.[^/.]+$/, "").toLowerCase();
-  const fileNameClean = fileNameWithoutExt.replace(/[-_\s]/g, "");
-
-  // Extract the base part from filename (before '-spec' or similar)
-  let baseFileName = fileNameWithoutExt;
-  const specPatterns = ['-spec', '_spec', '-specs', '_specs', '-documentation', '_docs'];
-  for (const pattern of specPatterns) {
-    if (fileNameWithoutExt.includes(pattern)) {
-      baseFileName = fileNameWithoutExt.split(pattern)[0].trim();
-      break;
-    }
-  }
-
-  console.log(`[SKU MATCH] Processing: ${fileName} -> Base: ${baseFileName}`);
-
-  if (skuTarget === "exact-sku" || skuTarget === "contains-sku") {
-    // Group SKUs by product to find partial matches
-    const productsMap = new Map<string, any[]>();
-
-    availableSKUs.forEach(sku => {
-      if (!sku || !sku.sku || !sku.productId) return;
-
-      if (!productsMap.has(sku.productId)) {
-        productsMap.set(sku.productId, []);
-      }
-      productsMap.get(sku.productId)!.push(sku);
-    });
-
-    console.log(`[SKU MATCH] Found ${productsMap.size} unique products to check`);
-
-    // Check each product for partial match
-    for (const [productId, productSKUs] of productsMap.entries()) {
-      for (const sku of productSKUs) {
-        if (!sku.sku) continue;
-
-        const skuClean = sku.sku.toLowerCase().replace(/[-_\s]/g, "");
-        const baseFileNameClean = baseFileName.replace(/[-_\s]/g, "");
-
-        console.log(`[SKU MATCH] Checking: ${baseFileNameClean} vs ${skuClean}`);
-
-        // Check if base filename matches the beginning of SKU (partial match)
-        if (skuClean.startsWith(baseFileNameClean)) {
-          console.log(`[SKU MATCH] ✓ Found partial match: ${baseFileName} matches ${sku.sku}`);
-
-          // Return the first variant of this product
-          return {
-            ...sku,
-            productSKUs: productSKUs, // All variants of this product
-            matchType: 'partial',
-            matchDetails: {
-              fileName: fileName,
-              baseFileName: baseFileName,
-              matchedSku: sku.sku,
-              matchedProduct: sku.productTitle
-            }
-          };
-        }
-
-        // Also check reverse - if SKU starts with base filename
-        if (baseFileNameClean.startsWith(skuClean)) {
-          console.log(`[SKU MATCH] ✓ Found reverse partial match: ${baseFileName} matches ${sku.sku}`);
-
-          return {
-            ...sku,
-            productSKUs: productSKUs,
-            matchType: 'partial-reverse',
-            matchDetails: {
-              fileName: fileName,
-              baseFileName: baseFileName,
-              matchedSku: sku.sku,
-              matchedProduct: sku.productTitle
-            }
-          };
-        }
-      }
-    }
-
-    console.log(`[SKU MATCH] ✗ No partial match found for: ${baseFileName}`);
-  }
-
-  return null;
-}
-
-// Helper function to update product spec sheet metafield with file_reference type
+// Helper function to update product spec sheet metafield with list.file_reference type
+// IMPORTANT: Shopify list.file_reference only accepts array of GIDs, not objects with metadata
 async function updateProductSpecSheetMetafield(
   admin: any,
   productId: string,
   fileGid: string,
+  colorCode: string,
+  colorName: string,
   fileName: string,
   requestId: string,
 ): Promise<boolean> {
   try {
     console.log(
-      `[${requestId}] Updating spec sheet metafield: productId=${productId}, fileName=${fileName}, fileGid=${fileGid}`,
+      `[${requestId}] Updating spec sheet metafield: productId=${productId}, colorCode=${colorCode}, colorName=${colorName}, fileName=${fileName}, fileGid=${fileGid}`,
     );
 
-    // Use metafieldsSet mutation to set file_reference metafield
+    // First, try to get existing metafield
+    const getMetafieldQuery = `
+      query getProductMetafield($productId: ID!, $namespace: String!, $key: String!) {
+        product(id: $productId) {
+          metafield(namespace: $namespace, key: $key) {
+            id
+            value
+            type
+            namespace
+            key
+          }
+        }
+      }
+    `;
+
+    const getResponse = await admin.graphql(getMetafieldQuery, {
+      variables: {
+        productId,
+        namespace: "custom",
+        key: "spec_sheet_pdf",
+      },
+    });
+
+    const getData = await getResponse.json();
+    const existingMetafield = getData?.data?.product?.metafield;
+
+    // Parse existing value if it exists
+    // For list.file_reference, value should be an array of GIDs: ["gid://shopify/GenericFile/123", ...]
+    let currentGidList: string[] = [];
+
+    if (existingMetafield && existingMetafield.value) {
+      try {
+        // Check if value is already an array or needs parsing
+        if (Array.isArray(existingMetafield.value)) {
+          currentGidList = existingMetafield.value;
+        } else if (typeof existingMetafield.value === 'string') {
+          currentGidList = JSON.parse(existingMetafield.value);
+        }
+
+        console.log(
+          `[${requestId}] Loaded existing spec sheet list with ${currentGidList.length} entries`,
+        );
+        console.log(`[${requestId}] Existing GIDs:`, currentGidList);
+      } catch (error) {
+        console.warn(
+          `[${requestId}] Failed to parse existing metafield, starting fresh:`,
+          error,
+        );
+        currentGidList = [];
+      }
+    }
+
+    // Check if this file GID already exists in the list
+    const existingGidIndex = currentGidList.findIndex((gid) => gid === fileGid);
+
+    if (existingGidIndex >= 0) {
+      // File already exists, update it (replace with new GID)
+      currentGidList[existingGidIndex] = fileGid;
+      console.log(
+        `[${requestId}] Updated existing spec sheet GID for color ${colorCode}`,
+      );
+    } else {
+      // Add new GID
+      currentGidList.push(fileGid);
+      console.log(
+        `[${requestId}] Added new spec sheet GID for color ${colorCode}: ${fileGid}`,
+      );
+    }
+
+    console.log(`[${requestId}] Final GID list (${currentGidList.length} entries):`, currentGidList);
+
+    // Use metafieldsSet mutation to set list.file_reference metafield
     const updateMetafieldQuery = `
       mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
         metafieldsSet(metafields: $metafields) {
@@ -1205,8 +1154,6 @@ async function updateProductSpecSheetMetafield(
       }
     `;
 
-    console.log(`[${requestId}] Using file reference: ${fileGid}`);
-
     const updateResponse = await admin.graphql(updateMetafieldQuery, {
       variables: {
         metafields: [
@@ -1214,8 +1161,8 @@ async function updateProductSpecSheetMetafield(
             ownerId: productId,
             namespace: "custom",
             key: "spec_sheet_pdf",
-            type: "file_reference",
-            value: fileGid,
+            type: "list.file_reference",
+            value: JSON.stringify(currentGidList),
           },
         ],
       },
@@ -1225,29 +1172,37 @@ async function updateProductSpecSheetMetafield(
 
     if (updateData?.data?.metafieldsSet?.userErrors?.length > 0) {
       const errors = updateData.data.metafieldsSet.userErrors;
-      console.error(`[${requestId}] GraphQL errors:`, errors);
+      console.error(`[${requestId}] ❌ GraphQL errors:`, errors);
+
+      // Log each error for debugging
+      errors.forEach((error: any) => {
+        console.error(`[${requestId}] Field: ${error.field}, Message: ${error.message}`);
+      });
+
       return false;
     }
 
     const createdMetafield = updateData?.data?.metafieldsSet?.metafields?.[0];
     if (createdMetafield) {
       console.log(
-        `[${requestId}] SUCCESS: Spec sheet metafield updated for product ${productId}`,
+        `[${requestId}] ✅ SUCCESS: Spec sheet metafield updated for product ${productId}`,
       );
       console.log(`[${requestId}] Metafield details:`, {
         id: createdMetafield.id,
         namespace: createdMetafield.namespace,
         key: createdMetafield.key,
         type: createdMetafield.type,
+        value: createdMetafield.value,
+        entriesCount: currentGidList.length,
       });
-      console.log(`[${requestId}] File GID: ${fileGid}`);
-      console.log(`[${requestId}] File name: ${fileName}`);
+      console.log(`[${requestId}] Spec sheet GIDs:`, currentGidList.join(', '));
       return true;
     }
 
+    console.error(`[${requestId}] ❌ No metafield returned from update`);
     return false;
   } catch (error) {
-    console.error(`[${requestId}] ERROR: Spec sheet metafield update failed:`, {
+    console.error(`[${requestId}] ❌ ERROR: Spec sheet metafield update failed:`, {
       error: error instanceof Error ? error.message : "Unknown error",
       stack: error instanceof Error ? error.stack : undefined,
     });
