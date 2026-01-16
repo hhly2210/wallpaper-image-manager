@@ -321,15 +321,25 @@ export function validatePDFColorCode(
 }
 
 /**
- * Match PDF file with product SKU using 3-tier matching strategy
+ * Match PDF file with product SKU using improved 3-tier matching strategy
  * This function is used by both Dry Upload and Start Upload
  *
- * Strategy:
- * Tier 1: Exact match (WP-SCALLOPS-SKY matches WP-SCALLOPS-SKY-*)
- * Tier 2: Color-first + flexible product match
- * Tier 3: Skip with detailed log
+ * Strategy (UPDATED):
+ * Tier 1: SKU Base Exact Match (highest priority) - Direct string comparison without removing dashes
+ *   - PDF base name: WP-SCAL-DUS (from WP-SCAL-DUS-spec.pdf)
+ *   - SKU base: WP-SCAL-DUS (from WP-SCAL-DUS-2424)
+ *   - Match: WP-SCAL-DUS === WP-SCAL-DUS ✓
  *
- * @param fileName - PDF filename (e.g., "WP-SCALLOPS-SKY-spec.pdf")
+ * Tier 2: Product Base Match (fallback if Tier 1 fails)
+ *   - Try to match by extracting product base and comparing with available SKUs
+ *   - Allows for partial matches and size variations
+ *
+ * Tier 3: Color-first Flexible Match (last resort)
+ *   - Find SKUs with matching color code
+ *   - Apply flexible product matching strategies
+ *   - Log warning for manual verification
+ *
+ * @param fileName - PDF filename (e.g., "WP-SCAL-DUS-spec.pdf")
  * @param availableSKUs - Array of SKU variants to match against
  * @param skuTarget - Matching strategy ("exact-sku" or "contains-sku")
  * @returns Matched SKU variant or null
@@ -357,7 +367,7 @@ export function matchPDFFileWithSKU(
   console.log(`[PDF MATCH] Base name: ${baseName}, Color code: ${colorCode}`);
 
   // Extract product base from file name (remove color code)
-  // WP-SCALLOPS-SKY → WP-SCALLOPS
+  // WP-SCAL-DUS → WP-SCAL
   const baseParts = baseName.split("-");
   if (baseParts.length < 3) {
     console.log(`[PDF MATCH] ❌ Invalid base name format: ${baseName}`);
@@ -368,50 +378,115 @@ export function matchPDFFileWithSKU(
   const productBase = baseParts.slice(0, -1).join("-");
   console.log(`[PDF MATCH] Product base: ${productBase}, Color: ${colorCode}`);
 
-  // ========== TIER 1: EXACT MATCH ==========
-  console.log(`[PDF MATCH] Tier 1: Trying exact match...`);
+  // ========== TIER 1: SKU BASE EXACT MATCH (HIGHEST PRIORITY) ==========
+  console.log(`[PDF MATCH] Tier 1: Trying SKU base exact match...`);
+
   const exactMatch = availableSKUs.find((sku) => {
     if (!sku || !sku.sku) return false;
 
-    // Check if SKU starts with baseName (WP-SCALLOPS-SKY)
+    // Extract SKU base (remove size codes)
+    // WP-SCAL-DUS-2424 → WP-SCAL-DUS
     const skuBase = extractSKUBase(sku.sku);
-    const skuBaseClean = skuBase.toLowerCase().replace(/[-_\s]/g, "");
-    const baseNameClean = baseName.replace(/[-_\s]/g, "");
 
-    return baseNameClean === skuBaseClean;
+    // Direct string comparison WITHOUT removing dashes
+    // This ensures WP-SCAL-DUS matches WP-SCAL-DUS but NOT WP-SCALLOPS-DUS
+    const skuBaseLower = skuBase.toLowerCase();
+    const baseNameLower = baseName.toLowerCase();
+
+    console.log(`[PDF MATCH] Tier 1: Comparing:`, {
+      pdfBaseName: baseNameLower,
+      skuBase: skuBaseLower,
+      fullSku: sku.sku,
+      match: skuBaseLower === baseNameLower,
+    });
+
+    return skuBaseLower === baseNameLower;
   });
 
   if (exactMatch) {
     const skuBase = extractSKUBase(exactMatch.sku);
-    console.log(`[PDF MATCH] ✓ Tier 1 MATCH: ${baseName} matches ${skuBase} (from ${exactMatch.sku})`);
+    console.log(`[PDF MATCH] ✓✓✓ Tier 1 MATCH (EXACT): ${baseName} matches ${skuBase} (from ${exactMatch.sku})`);
+    console.log(`[PDF MATCH] Product: ${exactMatch.productTitle}, Color: ${exactMatch.color}`);
     return exactMatch;
   }
 
   console.log(`[PDF MATCH] Tier 1: No exact match found`);
 
-  // ========== TIER 2: COLOR-FIRST + FLEXIBLE PRODUCT MATCH ==========
-  console.log(`[PDF MATCH] Tier 2: Trying color-first + flexible product match...`);
+  // ========== TIER 2: PRODUCT BASE MATCH (FALLBACK) ==========
+  console.log(`[PDF MATCH] Tier 2: Trying product base match...`);
 
-  // Step 2a: Find SKUs with matching color code
+  const productBaseMatch = availableSKUs.find((sku) => {
+    if (!sku || !sku.sku) return false;
+
+    const skuBase = extractSKUBase(sku.sku);
+    const skuBaseLower = skuBase.toLowerCase();
+    const baseNameLower = baseName.toLowerCase();
+
+    // Extract product part from SKU (remove color code)
+    // WP-SCAL-DUS → WP-SCAL
+    const skuParts = skuBase.split("-");
+    if (skuParts.length < 3) return false;
+
+    const skuProductPart = skuParts.slice(0, -1).join("-").toLowerCase();
+
+    // Extract product part from base name
+    // WP-SCAL-DUS → WP-SCAL
+    const fileProductPart = productBase.toLowerCase();
+
+    console.log(`[PDF MATCH] Tier 2: Comparing product parts:`, {
+      fileProductPart,
+      skuProductPart,
+      fileBaseName: baseNameLower,
+      skuBase,
+    });
+
+    // Check if product parts match exactly
+    if (fileProductPart === skuProductPart) {
+      console.log(`[PDF MATCH] Tier 2: ✓ Product base match found`);
+      return true;
+    }
+
+    // Check if base name starts with or contains SKU product part
+    if (baseNameLower.startsWith(skuProductPart + "-") || skuBaseLower.startsWith(fileProductPart + "-")) {
+      console.log(`[PDF MATCH] Tier 2: ✓ Partial product base match found`);
+      return true;
+    }
+
+    return false;
+  });
+
+  if (productBaseMatch) {
+    const skuBase = extractSKUBase(productBaseMatch.sku);
+    console.log(`[PDF MATCH] ✓✓ Tier 2 MATCH (PRODUCT BASE): ${baseName} matched with ${skuBase} (from ${productBaseMatch.sku})`);
+    console.log(`[PDF MATCH] Product: ${productBaseMatch.productTitle}, Color: ${productBaseMatch.color}`);
+    return productBaseMatch;
+  }
+
+  console.log(`[PDF MATCH] Tier 2: No product base match found`);
+
+  // ========== TIER 3: COLOR-FIRST FLEXIBLE MATCH (LAST RESORT) ==========
+  console.log(`[PDF MATCH] Tier 3: Trying color-first flexible match...`);
+
+  // Step 3a: Find SKUs with matching color code
   const colorMatches = availableSKUs.filter((sku) => {
     if (!sku || !sku.sku) return false;
     const skuColorCode = getColorCodeFromSKU(sku.sku);
     return skuColorCode === colorCode;
   });
 
-  console.log(`[PDF MATCH] Tier 2a: Found ${colorMatches.length} SKUs with color ${colorCode}`);
+  console.log(`[PDF MATCH] Tier 3a: Found ${colorMatches.length} SKUs with color ${colorCode}`);
 
   if (colorMatches.length === 0) {
     console.log(`[PDF MATCH] ❌ No SKUs found with color ${colorCode}`);
     return null;
   }
 
-  // Step 2b: Among SKUs with matching color, find flexible product match
+  // Step 3b: Among SKUs with matching color, find flexible product match
   const flexibleProductMatch = colorMatches.find((sku) => {
     if (!sku || !sku.sku) return false;
 
     // Extract product from SKU (remove color and size)
-    // WP-SCAL-BLU-2424 → WP-SCAL
+    // WP-SCAL-DUS-2424 → WP-SCAL
     const skuParts = sku.sku.split("-");
     if (skuParts.length < 3) return false;
 
@@ -419,7 +494,7 @@ export function matchPDFFileWithSKU(
     const skuProductClean = skuProduct.toLowerCase().replace(/[-_\s]/g, "");
     const productBaseClean = productBase.toLowerCase().replace(/[-_\s]/g, "");
 
-    console.log(`[PDF MATCH] Tier 2b: Comparing products:`, {
+    console.log(`[PDF MATCH] Tier 3b: Comparing products:`, {
       fileProduct: productBase,
       fileProductClean: productBaseClean,
       skuProduct: skuProduct,
@@ -429,13 +504,13 @@ export function matchPDFFileWithSKU(
     // Check flexible match:
     // 1. Exact match
     if (productBaseClean === skuProductClean) {
-      console.log(`[PDF MATCH] Tier 2b: ✓ Exact product match`);
+      console.log(`[PDF MATCH] Tier 3b: ✓ Exact product match`);
       return true;
     }
 
     // 2. Contains match (file contains SKU product OR SKU product contains file)
     if (productBaseClean.includes(skuProductClean) || skuProductClean.includes(productBaseClean)) {
-      console.log(`[PDF MATCH] Tier 2b: ✓ Contains product match`);
+      console.log(`[PDF MATCH] Tier 3b: ✓ Contains product match`);
       return true;
     }
 
@@ -447,7 +522,7 @@ export function matchPDFFileWithSKU(
     const matchRatio = commonWords.length / Math.max(fileWords.length, skuWords.length);
 
     if (matchRatio >= 0.5) {
-      console.log(`[PDF MATCH] Tier 2b: ✓ Word match (ratio: ${matchRatio})`);
+      console.log(`[PDF MATCH] Tier 3b: ✓ Word match (ratio: ${matchRatio})`);
       return true;
     }
 
@@ -456,13 +531,14 @@ export function matchPDFFileWithSKU(
 
   if (flexibleProductMatch) {
     const skuBase = extractSKUBase(flexibleProductMatch.sku);
-    console.log(`[PDF MATCH] ✓ Tier 2 MATCH: ${baseName} matched with ${skuBase} (from ${flexibleProductMatch.sku})`);
-    console.log(`[PDF MATCH] Note: This is a flexible match - please verify the result`);
+    console.log(`[PDF MATCH] ⚠️⚠️ Tier 3 MATCH (FLEXIBLE): ${baseName} matched with ${skuBase} (from ${flexibleProductMatch.sku})`);
+    console.log(`[PDF MATCH] ⚠️ WARNING: This is a flexible match - please verify the result manually`);
+    console.log(`[PDF MATCH] Product: ${flexibleProductMatch.productTitle}, Color: ${flexibleProductMatch.color}`);
     return flexibleProductMatch;
   }
 
-  // ========== TIER 3: SKIP ==========
-  console.log(`[PDF MATCH] ❌ Tier 3: No match found for ${baseName}`);
+  // ========== TIER 4: NO MATCH ==========
+  console.log(`[PDF MATCH] ❌❌❌ NO MATCH FOUND for ${baseName}`);
   console.log(`[PDF MATCH] Searched for:`, {
     productBase,
     colorCode,
