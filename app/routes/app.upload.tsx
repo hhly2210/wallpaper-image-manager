@@ -506,14 +506,19 @@ export default function UploadPage() {
   };
 
   // Function to detect image type from filename
+  // New naming convention: -1. = room, -2. = hover
   const detectImageType = (fileName: string): 'room' | 'hover' | null => {
     const lowerFileName = fileName.toLowerCase();
 
-    if (lowerFileName.includes('room') || lowerFileName.includes('roomset') || lowerFileName.includes('interior')) {
+    // Check for -1. pattern (room image)
+    // Example: WP-SCALLOPS-SKY-1.jpg -> room
+    if (lowerFileName.includes('-1.')) {
       return 'room';
     }
 
-    if (lowerFileName.includes('hover') || lowerFileName.includes('zoom') || lowerFileName.includes('detail') || lowerFileName.includes('close')) {
+    // Check for -2. pattern (hover image)
+    // Example: WP-SCALLOPS-SKY-2.jpg -> hover
+    if (lowerFileName.includes('-2.')) {
       return 'hover';
     }
 
@@ -1030,14 +1035,14 @@ export default function UploadPage() {
       const fileNameClean = fileNameWithoutExt.replace(/[-_\s]/g, ''); // Remove separators
 
       if (config.skuTarget === 'exact-sku') {
-        // Exact match with SKU base - check if filename starts with SKU base (handles WP-SCALLOPS-SKY-HOVER format)
+        // Exact match with SKU base - check if filename starts with SKU base (handles WP-SCALLOPS-SKY-1 format)
         matchedSKU = availableSKUs.find(sku => {
           // Extract SKU base (without size code)
           const skuBase = extractSKUBase(sku.sku);
           const skuBaseClean = skuBase.toLowerCase().replace(/[-_\s]/g, '');
 
           // Check if filename starts with SKU base (prefix match)
-          // This handles cases like: WP-SCALLOPS-SKY-HOVER matches WP-SCALLOPS-SKY-2424
+          // This handles cases like: WP-SCALLOPS-SKY-1 matches WP-SCALLOPS-SKY-2424
           const isPrefixMatch = fileNameClean.startsWith(skuBaseClean) ||
             fileNameWithoutExt.toLowerCase().startsWith(skuBase.toLowerCase());
 
@@ -1089,7 +1094,7 @@ export default function UploadPage() {
           const skuBase = extractSKUBase(sku.sku);
           const skuBaseClean = skuBase.toLowerCase().replace(/[-_\s]/g, '');
 
-          // Priority 1: Prefix match - filename starts with SKU base (WP-SCALLOPS-SKY-HOVER starts with WP-SCALLOPS-SKY)
+          // Priority 1: Prefix match - filename starts with SKU base (WP-SCALLOPS-SKY-1 starts with WP-SCALLOPS-SKY)
           const isPrefixMatch = fileNameClean.startsWith(skuBaseClean) ||
             fileNameWithoutExt.toLowerCase().startsWith(skuBase.toLowerCase());
 
@@ -1248,7 +1253,7 @@ export default function UploadPage() {
       if (!hasValidSKU) {
         message = 'Skipped: No SKU match found';
       } else {
-        message = 'Skipped: Invalid or missing image type (room/hover required)';
+        message = 'Skipped: Invalid or missing image type (1/2 required)';
       }
 
       shouldUpload = false;

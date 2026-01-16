@@ -516,14 +516,19 @@ export default function UploadPdfPage() {
   };
 
   // Function to detect image type from filename
+  // New naming convention: -1. = room, -2. = hover
   const detectImageType = (fileName: string): 'room' | 'hover' | null => {
     const lowerFileName = fileName.toLowerCase();
 
-    if (lowerFileName.includes('room') || lowerFileName.includes('roomset') || lowerFileName.includes('interior')) {
+    // Check for -1. pattern (room image)
+    // Example: WP-SCALLOPS-SKY-1.jpg -> room
+    if (lowerFileName.includes('-1.')) {
       return 'room';
     }
 
-    if (lowerFileName.includes('hover') || lowerFileName.includes('zoom') || lowerFileName.includes('detail') || lowerFileName.includes('close')) {
+    // Check for -2. pattern (hover image)
+    // Example: WP-SCALLOPS-SKY-2.jpg -> hover
+    if (lowerFileName.includes('-2.')) {
       return 'hover';
     }
 
