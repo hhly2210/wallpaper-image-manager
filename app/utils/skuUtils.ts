@@ -235,10 +235,16 @@ export async function fetchSKUDataFromShopify(
 }
 
 /**
- * Extract base name from PDF filename (remove -spec.pdf suffix)
+ * Extract base name from PDF filename (remove _SPEC.pdf or _spec.pdf suffix)
+ * Supports both uppercase and lowercase _SPEC
  */
 export function extractPDFBaseName(fileName: string): string {
-  const baseName = fileName.replace(/-spec\.pdf$/i, "");
+  // Try _SPEC first (uppercase), then _spec (lowercase)
+  let baseName = fileName.replace(/_SPEC\.pdf$/i, "");
+  if (baseName === fileName) {
+    // If _SPEC didn't match, try _spec
+    baseName = fileName.replace(/_spec\.pdf$/i, "");
+  }
   return baseName;
 }
 
@@ -271,9 +277,21 @@ export function getColorCodeFromSKU(sku: string): string {
 }
 
 /**
- * Validate PDF filename format and extract color code
- * Color code must be exactly 3 characters (3rd part after splitting by "-")
- * And filename must end with -spec.pdf
+ * Validate color code in filename (for both images and PDFs)
+ * STRICT FORMAT: Must follow WP-XXX-CCC[_type].ext where:
+ * - CCC is exactly 3 characters (color code)
+ * - For images: ends with _1.png or _2.png
+ * - For PDF: ends with _SPEC.pdf or _spec.pdf
+ * - NO extra parts like size codes allowed
+ *
+ * Valid examples:
+ * - WP-SCALLOPS-DUS_1.png → Color: DUS ✓
+ * - WP-SCALLOPS-DUS_2.png → Color: DUS ✓
+ * - WP-SCALLOPS-DUS_SPEC.pdf → Color: DUS ✓
+ *
+ * Invalid examples:
+ * - WP-SCALLOPS-DUSTY_ROSE-2748-1.png → Too many parts ✗
+ * - WP-SCALLOPS-DUS-HOVER.png → Wrong suffix ✗
  */
 export function validatePDFColorCode(
   fileName: string
@@ -282,27 +300,33 @@ export function validatePDFColorCode(
     return { valid: false, colorCode: "", baseName: "", reason: "No filename provided" };
   }
 
-  // Check if filename ends with -spec.pdf (case insensitive)
-  if (!fileName.toLowerCase().endsWith("-spec.pdf")) {
-    return {
-      valid: false,
-      colorCode: "",
-      baseName: "",
-      reason: `Filename must end with -spec.pdf (got: "${fileName}")`,
-    };
+  // Remove file extension
+  const fileNameWithoutExt = fileName.replace(/\.[^/.]+$/, "");
+
+  // Remove image type suffix from the end (_1, _2, _SPEC, _spec, _specs)
+  let baseName = fileNameWithoutExt;
+  const typeSuffixes = ['_1', '_2', '_SPEC', '_spec', '_specs'];
+
+  let foundSuffix = '';
+  for (const suffix of typeSuffixes) {
+    if (baseName.endsWith(suffix)) {
+      baseName = baseName.slice(0, -suffix.length);
+      foundSuffix = suffix;
+      break;
+    }
   }
 
-  // Remove -spec.pdf extension (case insensitive)
-  const baseName = fileName.replace(/-spec\.pdf$/i, "");
-
+  // Split by "-" and validate structure
   const parts = baseName.split("-");
 
-  if (parts.length < 3) {
+  // Must have exactly 3 parts: WP, product, color
+  // Extra parts like size codes are NOT allowed
+  if (parts.length !== 3) {
     return {
       valid: false,
       colorCode: "",
       baseName,
-      reason: `Filename does not have enough parts (expected format: WP-PRODUCT-COLOR-spec.pdf, got: "${fileName}")`,
+      reason: `Filename must have exactly 3 parts (WP-PRODUCT-COLOR), got ${parts.length} parts in "${fileName}"`,
     };
   }
 
@@ -326,7 +350,7 @@ export function validatePDFColorCode(
  *
  * Strategy (UPDATED):
  * Tier 1: SKU Base Exact Match (highest priority) - Direct string comparison without removing dashes
- *   - PDF base name: WP-SCAL-DUS (from WP-SCAL-DUS-spec.pdf)
+ *   - PDF base name: WP-SCAL-DUS (from WP-SCAL-DUS_spec.pdf)
  *   - SKU base: WP-SCAL-DUS (from WP-SCAL-DUS-2424)
  *   - Match: WP-SCAL-DUS === WP-SCAL-DUS ✓
  *
@@ -339,7 +363,7 @@ export function validatePDFColorCode(
  *   - Apply flexible product matching strategies
  *   - Log warning for manual verification
  *
- * @param fileName - PDF filename (e.g., "WP-SCAL-DUS-spec.pdf")
+ * @param fileName - PDF filename (e.g., "WP-SCAL-DUS_spec.pdf")
  * @param availableSKUs - Array of SKU variants to match against
  * @param skuTarget - Matching strategy ("exact-sku" or "contains-sku")
  * @returns Matched SKU variant or null

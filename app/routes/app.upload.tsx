@@ -506,19 +506,19 @@ export default function UploadPage() {
   };
 
   // Function to detect image type from filename
-  // New naming convention: -1. = room, -2. = hover
+  // New naming convention: _1. = room, _2. = hover
   const detectImageType = (fileName: string): 'room' | 'hover' | null => {
     const lowerFileName = fileName.toLowerCase();
 
-    // Check for -1. pattern (room image)
-    // Example: WP-SCALLOPS-SKY-1.jpg -> room
-    if (lowerFileName.includes('-1.')) {
+    // Check for _1. pattern (room image)
+    // Example: WP-SCALLOPS-SKY_1.jpg -> room
+    if (lowerFileName.includes('_1.')) {
       return 'room';
     }
 
-    // Check for -2. pattern (hover image)
-    // Example: WP-SCALLOPS-SKY-2.jpg -> hover
-    if (lowerFileName.includes('-2.')) {
+    // Check for _2. pattern (hover image)
+    // Example: WP-SCALLOPS-SKY_2.jpg -> hover
+    if (lowerFileName.includes('_2.')) {
       return 'hover';
     }
 
@@ -941,15 +941,47 @@ export default function UploadPage() {
   };
 
   // Helper function to validate color code in filename
-  // Color code must be exactly 3 characters (3rd part after splitting by "-")
+  // STRICT FORMAT: Must follow WP-XXX-CCC_1.png or WP-XXX-CCC_2.png
+  // where CCC is exactly 3 characters (color code)
+  // NO extra parts allowed (no size codes, etc.)
   const validateColorCode = (fileName: string): { valid: boolean; colorCode: string; reason?: string } => {
     if (!fileName) return { valid: false, colorCode: "", reason: "No filename provided" };
 
+    // Remove file extension
     const fileNameWithoutExt = fileName.replace(/\.[^/.]+$/, "");
-    const parts = fileNameWithoutExt.split("-");
 
-    if (parts.length < 3) {
-      return { valid: false, colorCode: "", reason: "Filename does not have enough parts" };
+    // Remove image type suffix from the end (_1, _2)
+    let baseName = fileNameWithoutExt;
+    const typeSuffixes = ['_1', '_2'];
+
+    let foundSuffix = '';
+    for (const suffix of typeSuffixes) {
+      if (baseName.endsWith(suffix)) {
+        baseName = baseName.slice(0, -suffix.length);
+        foundSuffix = suffix;
+        break;
+      }
+    }
+
+    // If no valid suffix found for image file
+    if (!foundSuffix && (fileName.endsWith('.png') || fileName.endsWith('.jpg') || fileName.endsWith('.jpeg'))) {
+      return {
+        valid: false,
+        colorCode: "",
+        reason: "Image filename must end with _1 or _2 (e.g., WP-SCALLOPS-DUS_1.png)"
+      };
+    }
+
+    // Split by "-" and validate structure
+    const parts = baseName.split("-");
+
+    // Must have exactly 3 parts: WP, product, color
+    if (parts.length !== 3) {
+      return {
+        valid: false,
+        colorCode: "",
+        reason: `Filename must have exactly 3 parts (WP-PRODUCT-COLOR), got ${parts.length} parts`
+      };
     }
 
     const colorCode = parts[2]; // 3rd part is the color code (index 2)

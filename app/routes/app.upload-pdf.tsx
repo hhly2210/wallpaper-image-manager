@@ -991,12 +991,14 @@ export default function UploadPdfPage() {
     if (availableSKUs.length > 0) {
       const fileNameWithoutExt = fileName.replace(/\.[^/.]+$/, '').toLowerCase();
 
-      // Extract the base part from filename (before '-spec' or similar)
+      // Extract the base part from filename (before '_spec', '_SPEC', etc.)
+      // This must match the logic in validatePDFColorCode
       let baseFileName = fileNameWithoutExt;
-      const specPatterns = ['-spec', '_spec', '-specs', '_specs', '-documentation', '_docs'];
+      const specPatterns = ['_spec', '_specs', '_SPEC'];
+
       for (const pattern of specPatterns) {
-        if (fileNameWithoutExt.includes(pattern)) {
-          baseFileName = fileNameWithoutExt.split(pattern)[0].trim();
+        if (fileNameWithoutExt.endsWith(pattern)) {
+          baseFileName = fileNameWithoutExt.slice(0, -pattern.length);
           break;
         }
       }
