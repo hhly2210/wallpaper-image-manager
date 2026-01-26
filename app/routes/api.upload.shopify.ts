@@ -688,65 +688,119 @@ async function handleFolderUpload(
           imageHeight: createdFile.image?.height,
         });
 
-        // If we only have GID, try to wait and query again for CDN URL
+        // If we only have GID, try to wait and query again for CDN URL with improved polling
         if (
           shopifyUrl === shopifyFileId &&
-          createdFile.fileStatus === "PROCESSING"
+          (createdFile.fileStatus === "PROCESSING" || !createdFile.fileStatus)
         ) {
           console.log(
-            `[${requestId}] File is processing, attempting to wait for CDN URL...`,
+            `[${requestId}] File is processing, attempting to wait for CDN URL with polling...`,
           );
 
           try {
-            // Wait a bit and query again
-            await new Promise((resolve) => setTimeout(resolve, 2000)); // Wait 2 seconds
+            const maxRetries = 5;
+            const waitTime = 3000; // 3 seconds between retries
+            let cdnUrlFound = false;
 
-            const retryQuery = `
-              query node($id: ID!) {
-                node(id: $id) {
-                  ... on MediaImage {
-                    status
-                    image {
-                      url
-                      width
-                      height
-                    }
-                    preview {
+            for (let attempt = 1; attempt <= maxRetries; attempt++) {
+              console.log(
+                `[${requestId}] CDN URL polling attempt ${attempt}/${maxRetries}...`,
+              );
+
+              // Wait before querying
+              if (attempt > 1) {
+                await new Promise((resolve) => setTimeout(resolve, waitTime));
+              }
+
+              const retryQuery = `
+                query node($id: ID!) {
+                  node(id: $id) {
+                    ... on MediaImage {
+                      status
                       image {
                         url
+                        width
+                        height
+                      }
+                      preview {
+                        image {
+                          url
+                        }
                       }
                     }
                   }
                 }
-              }
-            `;
+              `;
 
-            const retryResponse = await admin.graphql(retryQuery, {
-              variables: { id: shopifyFileId },
-            });
+              const retryResponse = await admin.graphql(retryQuery, {
+                variables: { id: shopifyFileId },
+              });
 
-            const retryData = await retryResponse.json();
-            const retryNode = retryData?.data?.node;
+              const retryData = await retryResponse.json();
+              const retryNode = retryData?.data?.node;
 
-            if (retryNode?.image?.url) {
-              shopifyUrl = retryNode.image.url;
               console.log(
-                `[${requestId}] Successfully obtained CDN URL after retry:`,
+                `[${requestId}] Polling attempt ${attempt} result:`,
                 {
-                  shopifyUrl,
-                  status: retryNode.status,
+                  status: retryNode?.status,
+                  hasImageUrl: !!retryNode?.image?.url,
+                  hasPreviewUrl: !!retryNode?.preview?.image?.url,
+                  imageUrl: retryNode?.image?.url,
                 },
               );
-            } else if (retryNode?.preview?.image?.url) {
-              shopifyUrl = retryNode.preview.image.url;
-              console.log(`[${requestId}] Using preview URL after retry:`, {
-                shopifyUrl,
-                status: retryNode.status,
-              });
+
+              if (retryNode?.image?.url && retryNode.image.url.startsWith("https://")) {
+                shopifyUrl = retryNode.image.url;
+                cdnUrlFound = true;
+                console.log(
+                  `[${requestId}] ✓ Successfully obtained CDN URL on attempt ${attempt}:`,
+                  {
+                    shopifyUrl,
+                    status: retryNode.status,
+                  },
+                );
+                break;
+              } else if (retryNode?.preview?.image?.url && retryNode.preview.image.url.startsWith("https://")) {
+                shopifyUrl = retryNode.preview.image.url;
+                cdnUrlFound = true;
+                console.log(
+                  `[${requestId}] ✓ Using preview URL on attempt ${attempt}:`,
+                  {
+                    shopifyUrl,
+                    status: retryNode.status,
+                  },
+                );
+                break;
+              } else if (retryNode?.status === "FAILED") {
+                console.warn(
+                  `[${requestId}] ✗ File processing failed, will use GID as fallback`,
+                );
+                break;
+              } else if (retryNode?.status === "PROCESSING" && attempt < maxRetries) {
+                console.log(
+                  `[${requestId}] File still processing, will retry in ${waitTime}ms...`,
+                );
+                continue;
+              } else if (attempt >= maxRetries) {
+              console.warn(
+                `[${requestId}] ✗ Max retries reached without CDN URL, will use GID as fallback`,
+              );
+              break;
             }
+          }
+
+          if (cdnUrlFound) {
+            console.log(
+              `[${requestId}] CDN URL obtained after polling, ready for metafield update`,
+            );
+          } else {
+            console.warn(
+              `[${requestId}] Could not obtain CDN URL after ${maxRetries} attempts, using GID: ${shopifyUrl}`,
+            );
+          }
           } catch (retryError) {
             console.warn(
-              `[${requestId}] Failed to retry for CDN URL:`,
+              `[${requestId}] Failed to poll for CDN URL:`,
               retryError,
             );
           }
@@ -1131,48 +1185,121 @@ async function handleFileIdsUpload(
           shopifyUrl = createdFile.id;
         }
 
-        // If we only have GID and file is processing, try to wait for CDN URL
+        // If we only have GID and file is processing, try to wait for CDN URL with polling
         if (
           shopifyUrl === createdFile.id &&
-          createdFile.fileStatus === "PROCESSING"
+          (createdFile.fileStatus === "PROCESSING" || !createdFile.fileStatus)
         ) {
-          try {
-            await new Promise((resolve) => setTimeout(resolve, 2000)); // Wait 2 seconds
+          console.log(
+            `[${requestId}] File is processing, attempting to wait for CDN URL with polling...`,
+          );
 
-            const retryQuery = `
-              query node($id: ID!) {
-                node(id: $id) {
-                  ... on MediaImage {
-                    status
-                    image {
-                      url
-                      width
-                      height
-                    }
-                    preview {
+          try {
+            const maxRetries = 5;
+            const waitTime = 3000; // 3 seconds between retries
+            let cdnUrlFound = false;
+
+            for (let attempt = 1; attempt <= maxRetries; attempt++) {
+              console.log(
+                `[${requestId}] CDN URL polling attempt ${attempt}/${maxRetries}...`,
+              );
+
+              // Wait before querying
+              if (attempt > 1) {
+                await new Promise((resolve) => setTimeout(resolve, waitTime));
+              }
+
+              const retryQuery = `
+                query node($id: ID!) {
+                  node(id: $id) {
+                    ... on MediaImage {
+                      status
                       image {
                         url
+                        width
+                        height
+                      }
+                      preview {
+                        image {
+                          url
+                        }
                       }
                     }
                   }
                 }
+              `;
+
+              const retryResponse = await admin.graphql(retryQuery, {
+                variables: { id: createdFile.id },
+              });
+
+              const retryData = await retryResponse.json();
+              const retryNode = retryData?.data?.node;
+
+              console.log(
+                `[${requestId}] Polling attempt ${attempt} result:`,
+                {
+                  status: retryNode?.status,
+                  hasImageUrl: !!retryNode?.image?.url,
+                  hasPreviewUrl: !!retryNode?.preview?.image?.url,
+                  imageUrl: retryNode?.image?.url,
+                },
+              );
+
+              if (retryNode?.image?.url && retryNode.image.url.startsWith("https://")) {
+                shopifyUrl = retryNode.image.url;
+                cdnUrlFound = true;
+                console.log(
+                  `[${requestId}] ✓ Successfully obtained CDN URL on attempt ${attempt}:`,
+                  {
+                    shopifyUrl,
+                    status: retryNode.status,
+                  },
+                );
+                break;
+              } else if (retryNode?.preview?.image?.url && retryNode.preview.image.url.startsWith("https://")) {
+                shopifyUrl = retryNode.preview.image.url;
+                cdnUrlFound = true;
+                console.log(
+                  `[${requestId}] ✓ Using preview URL on attempt ${attempt}:`,
+                  {
+                    shopifyUrl,
+                    status: retryNode.status,
+                  },
+                );
+                break;
+              } else if (retryNode?.status === "FAILED") {
+                console.warn(
+                  `[${requestId}] ✗ File processing failed, will use GID as fallback`,
+                );
+                break;
+              } else if (retryNode?.status === "PROCESSING" && attempt < maxRetries) {
+                console.log(
+                  `[${requestId}] File still processing, will retry in ${waitTime}ms...`,
+                );
+                continue;
+              } else if (attempt >= maxRetries) {
+                console.warn(
+                  `[${requestId}] ✗ Max retries reached without CDN URL, will use GID as fallback`,
+                );
+                break;
               }
-            `;
+            }
 
-            const retryResponse = await admin.graphql(retryQuery, {
-              variables: { id: createdFile.id },
-            });
-
-            const retryData = await retryResponse.json();
-            const retryNode = retryData?.data?.node;
-
-            if (retryNode?.image?.url) {
-              shopifyUrl = retryNode.image.url;
-            } else if (retryNode?.preview?.image?.url) {
-              shopifyUrl = retryNode.preview.image.url;
+            if (cdnUrlFound) {
+              console.log(
+                `[${requestId}] CDN URL obtained after polling`,
+              );
+            } else {
+              console.warn(
+                `[${requestId}] Could not obtain CDN URL after ${maxRetries} attempts, using GID`,
+              );
             }
           } catch (retryError) {
-            // Continue with GID if retry fails
+            console.warn(
+              `[${requestId}] Failed to poll for CDN URL:`,
+              retryError,
+            );
           }
         }
 
@@ -1463,7 +1590,7 @@ function detectImageType(fileName: string): "room" | "hover" | null {
   return null;
 }
 
-// Helper function to get CDN URL from GID using reference query
+// Helper function to get CDN URL from GID using reference query with improved polling
 async function getCdnUrlFromGid(
   admin: any,
   gid: string,
@@ -1471,10 +1598,6 @@ async function getCdnUrlFromGid(
 ): Promise<string> {
   try {
     console.log(`[${requestId}] Querying CDN URL for GID: ${gid}`);
-
-    // Wait a moment for file to be processed
-    console.log(`[${requestId}] Waiting 2 seconds for file processing...`);
-    await new Promise((resolve) => setTimeout(resolve, 2000));
 
     const referenceQuery = `
       query node($id: ID!) {
@@ -1499,55 +1622,84 @@ async function getCdnUrlFromGid(
       }
     `;
 
-    const response = await admin.graphql(referenceQuery, {
-      variables: { id: gid },
-    });
+    // Poll for CDN URL with multiple retries
+    const maxRetries = 5;
+    const waitTime = 3000; // 3 seconds between retries
 
-    const data = await response.json();
-    const node = data?.data?.node;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      console.log(
+        `[${requestId}] CDN URL polling attempt ${attempt}/${maxRetries} for GID: ${gid}`,
+      );
 
-    console.log(`[${requestId}] Query response for GID ${gid}:`, {
-      hasNode: !!node,
-      status: node?.status,
-      hasImage: !!node?.image,
-      hasOriginalSrc: !!node?.image?.originalSrc,
-      hasUrl: !!node?.image?.url,
-      hasPreview: !!node?.preview,
-      hasPreviewImage: !!node?.preview?.image,
-      originalSrc: node?.image?.originalSrc,
-      url: node?.image?.url,
-      previewOriginalSrc: node?.preview?.image?.originalSrc,
-      previewUrl: node?.preview?.image?.url,
-    });
+      // Wait before querying (except first attempt)
+      if (attempt > 1) {
+        console.log(`[${requestId}] Waiting ${waitTime}ms before retry...`);
+        await new Promise((resolve) => setTimeout(resolve, waitTime));
+      }
 
-    if (node?.image?.originalSrc) {
-      console.log(
-        `[${requestId}] Found CDN URL (originalSrc): ${node.image.originalSrc}`,
-      );
-      return node.image.originalSrc;
-    } else if (node?.image?.url && node?.image?.url.startsWith("https://")) {
-      console.log(`[${requestId}] Found CDN URL (url): ${node.image.url}`);
-      return node.image.url;
-    } else if (node?.preview?.image?.originalSrc) {
-      console.log(
-        `[${requestId}] Found CDN URL (preview originalSrc): ${node.preview.image.originalSrc}`,
-      );
-      return node.preview.image.originalSrc;
-    } else if (
-      node?.preview?.image?.url &&
-      node?.preview?.image?.url.startsWith("https://")
-    ) {
-      console.log(
-        `[${requestId}] Found CDN URL (preview url): ${node.preview.image.url}`,
-      );
-      return node.preview.image.url;
-    } else {
-      console.warn(
-        `[${requestId}] No CDN URL found for GID: ${gid}. Full response:`,
-        data,
-      );
-      return gid; // Fallback to GID
+      const response = await admin.graphql(referenceQuery, {
+        variables: { id: gid },
+      });
+
+      const data = await response.json();
+      const node = data?.data?.node;
+
+      console.log(`[${requestId}] Polling attempt ${attempt} result for GID ${gid}:`, {
+        hasNode: !!node,
+        status: node?.status,
+        hasImage: !!node?.image,
+        hasOriginalSrc: !!node?.image?.originalSrc,
+        hasUrl: !!node?.image?.url,
+        hasPreview: !!node?.preview,
+        hasPreviewImage: !!node?.preview?.image,
+        originalSrc: node?.image?.originalSrc,
+        url: node?.image?.url,
+        previewOriginalSrc: node?.preview?.image?.originalSrc,
+        previewUrl: node?.preview?.image?.url,
+      });
+
+      // Try to get CDN URL from various sources
+      if (node?.image?.originalSrc && node.image.originalSrc.startsWith("https://")) {
+        console.log(
+          `[${requestId}] ✓ Found CDN URL (originalSrc) on attempt ${attempt}: ${node.image.originalSrc}`,
+        );
+        return node.image.originalSrc;
+      } else if (node?.image?.url && node.image.url.startsWith("https://")) {
+        console.log(`[${requestId}] ✓ Found CDN URL (url) on attempt ${attempt}: ${node.image.url}`);
+        return node.image.url;
+      } else if (node?.preview?.image?.originalSrc && node.preview.image.originalSrc.startsWith("https://")) {
+        console.log(
+          `[${requestId}] ✓ Found CDN URL (preview originalSrc) on attempt ${attempt}: ${node.preview.image.originalSrc}`,
+        );
+        return node.preview.image.originalSrc;
+      } else if (node?.preview?.image?.url && node.preview.image.url.startsWith("https://")) {
+        console.log(
+          `[${requestId}] ✓ Found CDN URL (preview url) on attempt ${attempt}: ${node.preview.image.url}`,
+        );
+        return node.preview.image.url;
+      } else if (node?.status === "FAILED") {
+        console.warn(
+          `[${requestId}] ✗ File processing failed for GID: ${gid}`,
+        );
+        break; // Stop retrying if processing failed
+      } else if (node?.status === "PROCESSING" && attempt < maxRetries) {
+        console.log(
+          `[${requestId}] File still processing, will retry in ${waitTime}ms...`,
+        );
+        continue; // Try again
+      } else if (attempt >= maxRetries) {
+        console.warn(
+          `[${requestId}] ✗ Max retries reached without CDN URL for GID: ${gid}`,
+        );
+        break; // Stop retrying
+      }
     }
+
+    // If we get here, no CDN URL was found after all retries
+    console.warn(
+      `[${requestId}] No CDN URL found for GID: ${gid} after ${maxRetries} attempts, using GID as fallback`,
+    );
+    return gid; // Fallback to GID
   } catch (error) {
     console.warn(`[${requestId}] Failed to get CDN URL for GID ${gid}:`, error);
     return gid; // Fallback to GID
