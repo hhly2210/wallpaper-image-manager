@@ -1,5 +1,6 @@
 import { google } from "googleapis";
 import { authenticate } from "../shopify.server";
+import { googleAuthServer, GoogleAuthConfig } from "../services/googleAuthServer";
 
 export async function action({ request }: { request: Request }) {
   console.log(`[SERVER] Shopify upload API called`, {
@@ -32,6 +33,7 @@ export async function action({ request }: { request: Request }) {
       isShared,
       owner,
       accessToken,
+      refreshToken,
       type,
       skuTarget,
       conflictResolution,
@@ -47,6 +49,7 @@ export async function action({ request }: { request: Request }) {
       owner,
       hasAccessToken: !!accessToken,
       accessTokenLength: accessToken?.length || 0,
+      hasRefreshToken: !!refreshToken,
     });
 
     if (!accessToken) {
@@ -63,6 +66,12 @@ export async function action({ request }: { request: Request }) {
       );
     }
 
+    // Create auth config for potential token refresh
+    const authConfig: GoogleAuthConfig = {
+      accessToken,
+      refreshToken,
+    };
+
     // Handle different upload types
     if (type === "folder" && folderId) {
       return handleFolderUpload(
@@ -70,7 +79,7 @@ export async function action({ request }: { request: Request }) {
         folderName,
         isShared,
         owner,
-        accessToken,
+        authConfig,
         requestId,
         { skuTarget, conflictResolution },
         request,
@@ -78,7 +87,7 @@ export async function action({ request }: { request: Request }) {
     } else if (fileIds && Array.isArray(fileIds) && fileIds.length > 0) {
       return handleFileIdsUpload(
         fileIds,
-        accessToken,
+        authConfig,
         requestId,
         { skuTarget, conflictResolution },
         request,
@@ -129,7 +138,7 @@ async function handleFolderUpload(
   folderName: string,
   isShared: boolean,
   owner: string,
-  accessToken: string,
+  authConfig: GoogleAuthConfig,
   requestId: string,
   config: { skuTarget?: string; conflictResolution?: string },
   request: Request,
@@ -139,19 +148,21 @@ async function handleFolderUpload(
   );
 
   try {
-    // Initialize Google Drive service with access token
-    const auth = new google.auth.OAuth2();
-    auth.setCredentials({ access_token: accessToken });
-    const drive = google.drive({ version: "v3", auth });
-
-    // Get folder name if not provided
+    // Get folder name if not provided (with auto-refresh on 401)
     let actualFolderName = folderName;
     if (!actualFolderName) {
       try {
-        const folderResponse = await drive.files.get({
-          fileId: folderId,
-          fields: "name",
-        });
+        const folderResponse = await googleAuthServer.executeWithAutoRefresh(
+          authConfig,
+          async (accessToken) => {
+            const drive = googleAuthServer.createDriveClient(accessToken);
+            return await drive.files.get({
+              fileId: folderId,
+              fields: "name",
+            });
+          },
+          requestId
+        );
         actualFolderName = folderResponse.data.name || folderId;
         console.log(
           `[${requestId}] Retrieved folder name: ${actualFolderName}`,
@@ -167,16 +178,23 @@ async function handleFolderUpload(
     // Authenticate with Shopify
     const { admin } = await authenticate.admin(request);
 
-    // Get all image files from the folder
+    // Get all image files from the folder (with auto-refresh on 401)
     console.log(`[${requestId}] Fetching all files from folder: ${folderId}`);
     const query = `'${folderId}' in parents and (mimeType contains 'image/') and trashed=false`;
 
-    const listResponse = await drive.files.list({
-      q: query,
-      fields:
-        "files(id, name, mimeType, size, createdTime, webViewLink, webContentLink)",
-      pageSize: 1000, // Get up to 1000 files
-    });
+    const listResponse = await googleAuthServer.executeWithAutoRefresh(
+      authConfig,
+      async (accessToken) => {
+        const drive = googleAuthServer.createDriveClient(accessToken);
+        return await drive.files.list({
+          q: query,
+          fields:
+            "files(id, name, mimeType, size, createdTime, webViewLink, webContentLink)",
+          pageSize: 1000, // Get up to 1000 files
+        });
+      },
+      requestId
+    );
 
     const files = listResponse.data.files || [];
     console.log(`[${requestId}] Found ${files.length} image files in folder`);
@@ -289,11 +307,18 @@ async function handleFolderUpload(
           `[${requestId}] Processing file ${processedCount + 1}/${files.length}: ${file.name}`,
         );
 
-        // Get detailed file information
-        const fileResponse = await drive.files.get({
-          fileId: file.id!,
-          fields: "id, name, mimeType, size, webViewLink, webContentLink",
-        });
+        // Get detailed file information (with auto-refresh on 401)
+        const fileResponse = await googleAuthServer.executeWithAutoRefresh(
+          authConfig,
+          async (accessToken) => {
+            const drive = googleAuthServer.createDriveClient(accessToken);
+            return await drive.files.get({
+              fileId: file.id!,
+              fields: "id, name, mimeType, size, webViewLink, webContentLink",
+            });
+          },
+          requestId
+        );
 
         const fileData = fileResponse.data;
 
@@ -447,14 +472,21 @@ async function handleFolderUpload(
           );
         }
 
-        // Download file content from Google Drive
+        // Download file content from Google Drive (with auto-refresh on 401)
         console.log(`[${requestId}] Downloading file content: ${file.name}`);
-        const downloadResponse = await drive.files.get(
-          {
-            fileId: file.id!,
-            alt: "media",
+        const downloadResponse = await googleAuthServer.executeWithAutoRefresh(
+          authConfig,
+          async (accessToken) => {
+            const drive = googleAuthServer.createDriveClient(accessToken);
+            return await drive.files.get(
+              {
+                fileId: file.id!,
+                alt: "media",
+              },
+              { responseType: "arraybuffer" },
+            );
           },
-          { responseType: "arraybuffer" },
+          requestId
         );
 
         const fileBuffer = Buffer.from(downloadResponse.data as ArrayBuffer);
@@ -976,7 +1008,7 @@ async function handleFolderUpload(
 
 async function handleFileIdsUpload(
   fileIds: string[],
-  accessToken: string,
+  authConfig: GoogleAuthConfig,
   requestId: string,
   config: { skuTarget?: string; conflictResolution?: string },
   request: Request,
@@ -986,11 +1018,6 @@ async function handleFileIdsUpload(
   );
 
   try {
-    // Initialize Google Drive service with access token
-    const auth = new google.auth.OAuth2();
-    auth.setCredentials({ access_token: accessToken });
-    const drive = google.drive({ version: "v3", auth });
-
     // Authenticate with Shopify
     const { admin } = await authenticate.admin(request);
 
@@ -998,22 +1025,36 @@ async function handleFileIdsUpload(
 
     for (const fileId of fileIds) {
       try {
-        // Get file metadata from Google Drive
-        const fileResponse = await drive.files.get({
-          fileId,
-          fields: "id, name, mimeType, size, webViewLink",
-        });
+        // Get file metadata from Google Drive (with auto-refresh on 401)
+        const fileResponse = await googleAuthServer.executeWithAutoRefresh(
+          authConfig,
+          async (accessToken) => {
+            const drive = googleAuthServer.createDriveClient(accessToken);
+            return await drive.files.get({
+              fileId,
+              fields: "id, name, mimeType, size, webViewLink",
+            });
+          },
+          requestId
+        );
 
         const file = fileResponse.data;
 
-        // Download file content from Google Drive
+        // Download file content from Google Drive (with auto-refresh on 401)
         console.log(`[${requestId}] Downloading file content: ${file.name}`);
-        const downloadResponse = await drive.files.get(
-          {
-            fileId: fileId,
-            alt: "media",
+        const downloadResponse = await googleAuthServer.executeWithAutoRefresh(
+          authConfig,
+          async (accessToken) => {
+            const drive = googleAuthServer.createDriveClient(accessToken);
+            return await drive.files.get(
+              {
+                fileId: fileId,
+                alt: "media",
+              },
+              { responseType: "arraybuffer" },
+            );
           },
-          { responseType: "arraybuffer" },
+          requestId
         );
 
         const fileBuffer = Buffer.from(downloadResponse.data as ArrayBuffer);

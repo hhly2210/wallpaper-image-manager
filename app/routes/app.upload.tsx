@@ -164,6 +164,7 @@ export default function UploadPage() {
           type: 'folder',
           folderId: selectedFolderId,
           accessToken,
+          refreshToken: googleAuth.getTokens()?.refreshToken,
           skuTarget: data.skuTarget,
           conflictResolution: data.conflictResolution
         })

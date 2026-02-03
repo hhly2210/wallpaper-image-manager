@@ -164,6 +164,7 @@ export default function UploadPdfPage() {
           type: 'folder',
           folderId: selectedFolderId,
           accessToken,
+          refreshToken: googleAuth.getTokens()?.refreshToken,
           skuTarget: data.skuTarget,
           conflictResolution: data.conflictResolution
         })
