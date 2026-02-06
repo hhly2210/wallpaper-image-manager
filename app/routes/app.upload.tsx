@@ -157,6 +157,7 @@ export default function UploadPage() {
 
       const response = await fetch('/api/upload/shopify', {
         method: 'POST',
+        credentials: 'same-origin', // Include cookies for Shopify session
         headers: {
           'Content-Type': 'application/json',
         },

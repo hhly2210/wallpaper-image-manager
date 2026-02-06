@@ -814,22 +814,22 @@ async function handleFolderUpload(
                 );
                 continue;
               } else if (attempt >= maxRetries) {
-              console.warn(
-                `[${requestId}] ✗ Max retries reached without CDN URL, will use GID as fallback`,
-              );
-              break;
+                console.warn(
+                  `[${requestId}] ✗ Max retries reached without CDN URL, will use GID as fallback`,
+                );
+                break;
+              }
             }
-          }
 
-          if (cdnUrlFound) {
-            console.log(
-              `[${requestId}] CDN URL obtained after polling, ready for metafield update`,
-            );
-          } else {
-            console.warn(
-              `[${requestId}] Could not obtain CDN URL after ${maxRetries} attempts, using GID: ${shopifyUrl}`,
-            );
-          }
+            if (cdnUrlFound) {
+              console.log(
+                `[${requestId}] CDN URL obtained after polling, ready for metafield update`,
+              );
+            } else {
+              console.warn(
+                `[${requestId}] Could not obtain CDN URL after ${maxRetries} attempts, using GID: ${shopifyUrl}`,
+              );
+            }
           } catch (retryError) {
             console.warn(
               `[${requestId}] Failed to poll for CDN URL:`,

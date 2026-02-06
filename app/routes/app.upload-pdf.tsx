@@ -157,6 +157,7 @@ export default function UploadPdfPage() {
 
       const response = await fetch('/api/upload/pdf/shopify', {
         method: 'POST',
+        credentials: 'same-origin', // Include cookies for Shopify session
         headers: {
           'Content-Type': 'application/json',
         },

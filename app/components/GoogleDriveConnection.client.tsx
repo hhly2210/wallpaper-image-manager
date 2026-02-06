@@ -208,8 +208,9 @@ export default function GoogleDriveConnection() {
 
       setIsUploading(true);
 
-      // Get access token for the upload
+      // Get access token and refresh token for the upload
       const accessToken = await googleAuth.getValidAccessToken();
+      const tokens = googleAuth.getTokens();
 
       if (!accessToken) {
         throw new Error('Not authenticated with Google Drive');
@@ -218,6 +219,7 @@ export default function GoogleDriveConnection() {
       // Call upload API with folder instead of specific files
       const response = await fetch('/api/upload/shopify', {
         method: 'POST',
+        credentials: 'same-origin', // Include cookies for Shopify session
         headers: {
           'Content-Type': 'application/json',
         },
@@ -227,6 +229,7 @@ export default function GoogleDriveConnection() {
           isShared: folderInfo.isShared,
           owner: folderInfo.owner,
           accessToken,
+          refreshToken: tokens?.refreshToken || null, // Send refresh token for auto-refresh
           // Indicate this is a folder upload
           type: 'folder'
         }),
