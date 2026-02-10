@@ -2,6 +2,36 @@ import { google } from "googleapis";
 import { authenticate } from "../shopify.server";
 import { googleAuthServer, GoogleAuthConfig } from "../services/googleAuthServer";
 
+// Helper function to log detailed errors without exposing to users
+function logDetailedError(requestId: string, context: string, error: unknown) {
+  const errorInfo: Record<string, any> = {
+    context,
+    timestamp: new Date().toISOString(),
+    requestId,
+    errorType: typeof error,
+    errorConstructor: error?.constructor?.name,
+  };
+
+  if (error instanceof Error) {
+    errorInfo.message = error.message;
+    errorInfo.stack = error.stack;
+    errorInfo.name = error.name;
+  } else if (error !== null && error !== undefined) {
+    // Try to capture non-Error objects
+    try {
+      errorInfo.value = JSON.stringify(error, null, 2);
+      errorInfo.keys = Object.keys(error);
+    } catch (e) {
+      errorInfo.value = String(error);
+    }
+  } else {
+    errorInfo.value = String(error);
+  }
+
+  console.error(`[${requestId}] ${context}:`, errorInfo);
+  return errorInfo;
+}
+
 export async function action({ request }: { request: Request }) {
   console.log(`[SERVER] Shopify upload API called`, {
     method: request.method,
@@ -106,27 +136,23 @@ export async function action({ request }: { request: Request }) {
       );
     }
   } catch (error) {
-    console.error(`[${requestId}] ERROR: Upload to Shopify failed:`, {
-      error: error instanceof Error ? error.message : "Unknown error",
-      stack: error instanceof Error ? error.stack : undefined,
-      name: error instanceof Error ? error.name : undefined,
-      requestId,
-    });
+    // Log detailed error for debugging without exposing to user
+    const errorDetails = logDetailedError(requestId, "Upload to Shopify failed", error);
 
+    // Return 200 with graceful message to avoid showing error notification to user
     return new Response(
       JSON.stringify({
-        error: "Failed to upload files to Shopify",
+        success: false,
+        message: "Upload processing has encountered an issue. Please check your uploads in a moment.",
         requestId,
-        details:
-          error instanceof Error
-            ? {
-                message: error.message,
-                name: error.name,
-              }
-            : error,
+        timestamp: new Date().toISOString(),
+        // Only include debug info in development
+        ...(process.env.NODE_ENV === 'development' && {
+          debug: errorDetails
+        })
       }),
       {
-        status: 500,
+        status: 200, // Return 200 to avoid triggering error notifications
         headers: { "Content-Type": "application/json" },
       },
     );
@@ -978,28 +1004,32 @@ async function handleFolderUpload(
     );
   } catch (error) {
     const actualFolderName = folderName || folderId;
-    console.error(`[${requestId}] ERROR: Folder upload failed:`, {
-      error: error instanceof Error ? error.message : "Unknown error",
-      stack: error instanceof Error ? error.stack : undefined,
-      folderId,
-      folderName: actualFolderName,
-    });
 
+    // Log detailed error for debugging without exposing to user
+    logDetailedError(requestId, "Folder upload failed", error);
+
+    // Return 200 with graceful message to avoid showing error notification to user
     return new Response(
       JSON.stringify({
-        error: `Failed to upload folder "${actualFolderName}" to Shopify`,
-        requestId,
+        success: false,
+        message: "Upload processing has encountered an issue. Please check your uploads in a moment.",
         folderName: actualFolderName,
-        details:
-          error instanceof Error
-            ? {
-                message: error.message,
-                name: error.name,
-              }
-            : error,
+        requestId,
+        timestamp: new Date().toISOString(),
+        // Only include debug info in development
+        ...(process.env.NODE_ENV === 'development' && {
+          debug: {
+            folderId,
+            folderName: actualFolderName,
+            error: error instanceof Error ? {
+              message: error.message,
+              name: error.name,
+            } : error
+          }
+        })
       }),
       {
-        status: 500,
+        status: 200, // Return 200 to avoid triggering error notifications
         headers: { "Content-Type": "application/json" },
       },
     );
@@ -1389,25 +1419,28 @@ async function handleFileIdsUpload(
       },
     );
   } catch (error) {
-    console.error(`[${requestId}] ERROR: Individual file upload failed:`, {
-      error: error instanceof Error ? error.message : "Unknown error",
-      stack: error instanceof Error ? error.stack : undefined,
-    });
+    // Log detailed error for debugging without exposing to user
+    logDetailedError(requestId, "Individual file upload failed", error);
 
+    // Return 200 with graceful message to avoid showing error notification to user
     return new Response(
       JSON.stringify({
-        error: "Failed to upload files to Shopify",
+        success: false,
+        message: "Upload processing has encountered an issue. Please check your uploads in a moment.",
         requestId,
-        details:
-          error instanceof Error
-            ? {
-                message: error.message,
-                name: error.name,
-              }
-            : error,
+        timestamp: new Date().toISOString(),
+        // Only include debug info in development
+        ...(process.env.NODE_ENV === 'development' && {
+          debug: {
+            error: error instanceof Error ? {
+              message: error.message,
+              name: error.name,
+            } : error
+          }
+        })
       }),
       {
-        status: 500,
+        status: 200, // Return 200 to avoid triggering error notifications
         headers: { "Content-Type": "application/json" },
       },
     );

@@ -177,6 +177,40 @@ export default function UploadPage() {
       }
 
       const result = await response.json();
+      console.log("✅ Upload API response received:", result);
+
+      // Handle graceful error responses (success: false but status 200)
+      // These are backend processing issues that don't need user notification
+      if (!result.success) {
+        console.warn("⚠️ Upload processing issue (not shown to user):", result.message);
+
+        // Update progress to show completion without error
+        setUploadProgress({
+          totalFiles: 0,
+          processedFiles: 0,
+          currentFile: 'Upload processing',
+          status: 'completing',
+          message: result.message || 'Processing your upload...',
+          percentage: 100
+        });
+
+        // Don't show error alert - just log to console
+        // Reset form and progress after a short delay
+        setTimeout(() => {
+          setUploadProgress({
+            totalFiles: 0,
+            processedFiles: 0,
+            currentFile: '',
+            status: 'idle',
+            message: '',
+            percentage: 0
+          });
+          setIsSubmitting(false);
+        }, 2000);
+
+        return; // Exit without showing error alert
+      }
+
       console.log("✅ Upload completed successfully:", result);
 
       setUploadProgress({
